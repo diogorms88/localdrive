@@ -512,9 +512,10 @@ export function createDownloadQueue({
     storageIdentity(job);
     const directory = `${job.root}/downloads/extracted`;
     fs.mkdir(directory, {recursive: true});
-    job.output ||
-      (job.output =
-        job.release.saveTo || `${directory}/${job.release.filename.replace(/[^a-z0-9_.-]/gi, '_')}`);
+    // An archive bound for `saveTo` is staged here first: extraction only publishes a folder it creates,
+    // and the target folder may already exist (a job queued by 0.0.7 recorded it as its output).
+    if (job.release.saveTo && job.output === job.release.saveTo) job.output = null;
+    job.output || (job.output = `${directory}/${job.release.filename.replace(/[^a-z0-9_.-]/gi, '_')}`);
     if (job.publishTo && fs.exists(job.publishTo)) job.output = job.publishTo;
     return {
       sources: files,
@@ -598,6 +599,8 @@ export function createDownloadQueue({
       job.artifact.destination = `${job.output}/${images[0]}`;
       job.state = 'downloaded';
       job.message = t('downloads.extractedReady', {parts: job.parts ? 'all' : 'one'});
+    } else if (job.release.saveTo) {
+      deliver(job);
     } else {
       job.state = 'extracted';
       job.message = t('downloads.extractedTo', {path: job.output});
@@ -631,6 +634,32 @@ export function createDownloadQueue({
     } catch (error) {
       job.message = `${job.message} ${t('downloads.archiveNotDeleted', {error: error.message})}`;
     }
+  }
+  // Moves a staged extraction into `saveTo`, which may already hold other files: a single top-level
+  // folder in the archive is unwrapped, and a file that already exists there is kept, not replaced.
+  function deliver(job) {
+    const folder = job.release.saveTo;
+    const visible = path => fs.readDir(path).filter(entry => !entry.name.startsWith('.ps5-react-'));
+    let from = job.output;
+    let entries = visible(from);
+    while (entries.length === 1 && entries[0].isDirectory) {
+      from = `${from}/${entries[0].name}`;
+      entries = visible(from);
+    }
+    fs.mkdir(folder, {recursive: true});
+    const kept = [];
+    for (const {name} of entries) {
+      if (fs.exists(`${folder}/${name}`)) kept.push(name);
+      else fs.rename(`${from}/${name}`, `${folder}/${name}`);
+    }
+    if (!kept.length) {
+      fs.removeTree(job.output);
+      job.output = null;
+    }
+    job.state = 'extracted';
+    job.message = kept.length
+      ? t('downloads.extractedKept', {path: folder, files: kept.join(', '), staged: from})
+      : t('downloads.extractedTo', {path: folder});
   }
   function streamSet(job) {
     const first = job.parts[0].destination;

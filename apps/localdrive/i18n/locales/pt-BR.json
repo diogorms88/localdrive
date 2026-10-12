@@ -104,6 +104,7 @@
   "downloads.emptyDetail": "Jogos que você baixa aparecem aqui com seu progresso.",
   "downloads.extractedReady": "{parts, select, all {Todas as partes} other {Arquivo}} verificado e extraído. Pronto para instalar.",
   "downloads.extractedTo": "Extraído para {path}",
+  "downloads.extractedKept": "Extraído para {path}. Já existiam e não foram substituídos: {files} (a cópia nova está em {staged})",
   "downloads.installFailed": "O console recusou o pacote. Aperte Instalar para tentar de novo.",
   "downloads.installHint": "Feche LocalDrive para terminar: ShadowMount instala quando nenhum jogo está aberto.",
   "downloads.installRequested": "Instalação solicitada. Feche LocalDrive para terminar: ShadowMount instala quando nenhum jogo está aberto.",

@@ -45,6 +45,8 @@ function jobLine(t, entry) {
   if (busy) return t(job.state === 'extracting' ? 'homebrew.state.extracting' : 'homebrew.state.downloading');
   if (job.state === 'failed') return t('homebrew.state.failed', {error: job.error || ''});
   if (job.state === 'paused') return t('homebrew.state.paused');
+  // Some files were already in the BIOS folder: the message names them and where the new copies are.
+  if (job.state === 'extracted' && job.output) return job.message;
   return null;
 }
 
