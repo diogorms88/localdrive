@@ -32,6 +32,7 @@ bool browser_match(void *context, const unsigned char *bytes, size_t length) {
                     if (step == 2 && bytes[i + j * step + 1]) break;
                     if (boundary(c)) {
                         candidate[j] = 0;
+                        browser_unescape_ampersands(candidate);
                         if (browser_archive_url(candidate)) {
                             memcpy(match->url, candidate, j + 1);
                             return true;

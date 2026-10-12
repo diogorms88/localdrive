@@ -80,3 +80,18 @@ bool browser_archive_url(const char *url) {
     if (*p <= 32 || *p >= 127 || *p == '\\' || *p == '"' || *p == '<' || *p == '>') return false;
   return cdromance_download(url, host_end);
 }
+
+// CDRomance's "Show Links" response is HTML, so the copy in browser memory may separate
+// query parameters with `&amp;`, `&#38;` or `&#038;`. The server answers those with HTTP 400.
+void browser_unescape_ampersands(char *url) {
+  static const char *const entities[] = {"&amp;", "&#038;", "&#38;"};
+  char *out = url;
+  for (const char *in = url; *in;) {
+    size_t skip = 0;
+    for (size_t i = 0; i < sizeof entities / sizeof *entities && !skip; i++)
+      if (!strncasecmp(in, entities[i], strlen(entities[i]))) skip = strlen(entities[i]);
+    *out++ = *in;
+    in += skip ? skip : 1;
+  }
+  *out = 0;
+}

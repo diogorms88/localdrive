@@ -506,7 +506,8 @@ slashes, backslashes or `..`. LocalDrive's PS2 flow uses the additive
 `captureArchive({timeoutSeconds})` call: it returns the first complete HTTPS
 CDRomance `dl*.cdromance.org/download.php?file=...` URL visible to the browser
 scanner when the `file` parameter names a `.zip`, `.rar` or `.7z` archive. This
-avoids mistaking the game page or a text fragment for the final file URL. This
+avoids mistaking the game page or a text fragment for the final file URL. HTML
+entities `&amp;`, `&#38;` and `&#038;` in the captured URL are decoded to `&`. This
 mode does not report clicks and may not recognize providers that hide the file
 extension. The deadline is an integer from 1 to 180 seconds.
 Snapshots have `id`, `state`, `error` and a matching `url` on completion.
