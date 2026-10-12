@@ -53,10 +53,12 @@ int main(void) {
   char magic[8], prefix[64], suffix[162], seconds[8];
   signal(SIGPIPE, SIG_IGN);
   if (!line(magic, sizeof magic) || strcmp(magic, "BRC1") || !line(prefix, sizeof prefix) ||
-      strcmp(prefix, "https://vikingfile.com/d/") || !line(suffix, sizeof suffix) ||
-      suffix[0] != '/' || !line(seconds, sizeof seconds)) return fail("Invalid capture request.");
-  const char *filename = suffix + 1;
-  if (strchr(filename, '/') || strchr(filename, '\\') || strstr(filename, "..")) return fail("Invalid filename.");
+      (!strcmp(prefix, "archive") ? false : strcmp(prefix, "https://vikingfile.com/d/")) ||
+      !line(suffix, sizeof suffix) || !line(seconds, sizeof seconds)) return fail("Invalid capture request.");
+  const bool archive_mode = !strcmp(prefix, "archive");
+  if ((!archive_mode && suffix[0] != '/') || (archive_mode && suffix[0])) return fail("Invalid capture request.");
+  const char *filename = archive_mode ? NULL : suffix + 1;
+  if (filename && (strchr(filename, '/') || strchr(filename, '\\') || strstr(filename, ".."))) return fail("Invalid filename.");
   char *end;
   const long timeout = strtol(seconds, &end, 10);
   if (*end || timeout < 1 || timeout > 180 || !now()) return fail("Invalid deadline.");
@@ -73,7 +75,7 @@ int main(void) {
     .match = browser_match, .match_context = &match, .remaining = 128U * 1024U * 1024U};
   ProbeResult result = PROBE_ABSENT;
   while (active(&target) && reader.remaining) {
-    result = probe_target_scan(&target, &reader, prefix);
+    result = probe_target_scan(&target, &reader, archive_mode ? "https://" : prefix);
     if (result == PROBE_FOUND && active(&target)) {
       say("found", match.url);
       memset(&match, 0, sizeof match);

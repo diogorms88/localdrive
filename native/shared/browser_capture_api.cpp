@@ -19,12 +19,22 @@ bool text(JSContext* ctx, JSValueConst value, std::string& out) {
 JSValue capture(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
   std::string prefix, suffix;
   double timeout = 0;
-  if (argc < 3 || !text(ctx, argv[0], prefix) || prefix != "https://vikingfile.com/d/" ||
-      !text(ctx, argv[1], suffix) || suffix.empty() || suffix[0] != '/' ||
-      suffix.find('/', 1) != std::string::npos || suffix.find('\\') != std::string::npos ||
-      suffix.find("..") != std::string::npos || JS_ToFloat64(ctx, &timeout, argv[2]) ||
-      !std::isfinite(timeout) || timeout < 1 || timeout > 180 || std::floor(timeout) != timeout)
-    return JS_ThrowTypeError(ctx, "browser.capture: expected the Vikingfile prefix, /filename (160 UTF-8 bytes), and 1..180 seconds");
+  if (argc < 3 || !text(ctx, argv[0], prefix) ||
+      (prefix != "https://vikingfile.com/d/" && prefix != "archive") || !JS_IsString(argv[1]) ||
+      JS_ToFloat64(ctx, &timeout, argv[2]) || !std::isfinite(timeout) ||
+      timeout < 1 || timeout > 180 || std::floor(timeout) != timeout)
+    return JS_ThrowTypeError(ctx, "browser.capture: expected a supported capture mode and a timeout from 1..180 seconds");
+  size_t suffix_length = 0;
+  const char* suffix_text = JS_ToCStringLen(ctx, &suffix_length, argv[1]);
+  if (!suffix_text) return JS_ThrowTypeError(ctx, "browser.capture: invalid suffix");
+  const bool suffix_valid = suffix_length <= 160 && !std::memchr(suffix_text, 0, suffix_length);
+  if (suffix_valid) suffix.assign(suffix_text, suffix_length);
+  JS_FreeCString(ctx, suffix_text);
+  const bool archive_mode = prefix == "archive";
+  if (!suffix_valid || (archive_mode ? !suffix.empty() :
+      (suffix.empty() || suffix[0] != '/' || suffix.find('/', 1) != std::string::npos ||
+       suffix.find('\\') != std::string::npos || suffix.find("..") != std::string::npos)))
+    return JS_ThrowTypeError(ctx, "browser.capture: Vikingfile needs /filename; archive mode takes an empty suffix");
   for (const unsigned char c : suffix) if (c < 32 || c == 127)
     return JS_ThrowTypeError(ctx, "browser.capture: filename contains a control character");
   std::string error;

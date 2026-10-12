@@ -9,6 +9,8 @@
   that game's CDRomance page in the system browser.
 - PS2 queue entries route ZIP and other archive contents to `/data/PCSX2/games` on PS5. Plain PS2
   files are saved there as well; PS4/PS5 queue destinations and installation flow remain unchanged.
+- Added a PS5-only “Open and detect download” action on PS2 game pages. It opens the system browser,
+  captures a visible HTTPS ZIP/RAR/7z URL, and enqueues it for extraction into `/data/PCSX2/games`.
 
 ## LocalDrive v0.0.6
 

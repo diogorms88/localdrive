@@ -11,4 +11,7 @@ Only the uniquely identified SceNKNetworkProcess/SceNKNetworkProc is read.
 Identity is rechecked before reads; no executable/file-backed pages, writes,
 cookies, dumps or arbitrary process selectors. Each session has a 128 MiB total
 read budget, 64 KiB reads separated by 32 ms, and a maximum 180-second deadline.
-Only a complete matching Vikingfile URL is returned. Buffers are wiped.
+Vikingfile capture returns only a complete matching route and filename. The PS2
+archive mode returns the first complete HTTPS URL with a visible `.zip`, `.rar`
+or `.7z` suffix in its path or query; it does not determine which click caused
+the URL to appear. Buffers are wiped.

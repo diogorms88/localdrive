@@ -1,5 +1,5 @@
-import {useEffect, useState} from 'react';
-import {View, Text, Image, ScrollView, FocusScope, motion, Linking} from '@ps5-react/core';
+import {useEffect, useRef, useState} from 'react';
+import {View, Text, Image, ScrollView, FocusScope, motion, Linking, BrowserCapture, Platform} from '@ps5-react/core';
 import {useT, useLocale, latin} from '../i18n/index.js';
 import {genreLabel, formatDate} from '../state/catalog.js';
 import {fitBytes, SPAN_MAX} from '../i18n/fit.js';
@@ -17,6 +17,8 @@ import {BackLink} from '../game/BackLink.jsx';
 import {MediaGallery} from '../game/MediaGallery.jsx';
 import {About} from '../game/About.jsx';
 import {ShotViewer} from '../game/ShotViewer.jsx';
+import {downloadQueue, storageRoots} from '../state/downloads.js';
+import {webURL} from '../state/download-sources.js';
 import {loadPs2Details, usePs2Catalog} from './source.js';
 import '../assets/Inter-Regular.ttf';
 
@@ -56,7 +58,7 @@ function Backdrop({game}) {
   ) : null;
 }
 
-function Hero({game, onBack, onViewWeb}) {
+function Hero({game, onBack, onViewWeb, onDetectDownload, captureState, captureError}) {
   const t = useT();
   const {rtl} = useLocale();
   const {toggleWish} = useStoreActions();
@@ -148,12 +150,24 @@ function Hero({game, onBack, onViewWeb}) {
               </motion.View>
             ) : null}
             <View style={{marginTop: 42, flexDirection: 'row', alignItems: 'flex-start', gap: 15}}>
+              {Platform.OS === 'ps5' ? (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  label={captureState === 'capturing' ? t('ps2.captureWaiting') : t('ps2.captureDownload')}
+                  icon={captureState === 'capturing' ? 'external' : 'download'}
+                  autoFocus
+                  focusKey={`ps2:capture:${game.id}`}
+                  nextFocusDown={nextDown}
+                  onPress={onDetectDownload}
+                />
+              ) : null}
               <Button
-                variant="primary"
+                variant="outline"
                 size="lg"
                 label={t('ps2.viewOnWeb')}
                 icon="external"
-                autoFocus
+                autoFocus={Platform.OS !== 'ps5'}
                 focusKey={`ps2:view-web:${game.id}`}
                 nextFocusDown={nextDown}
                 onPress={onViewWeb}
@@ -169,6 +183,21 @@ function Hero({game, onBack, onViewWeb}) {
                 <WishHeart active={wished} />
               </Button>
             </View>
+            {captureState === 'capturing' ? (
+              <Text style={{marginTop: 16, fontFamily: 'Inter-Regular', fontSize: 18, color: '#a3a3ab'}}>
+                {t('ps2.captureInstructions')}
+              </Text>
+            ) : null}
+            {captureError ? (
+              <Text style={{marginTop: 16, width: 900, fontFamily: 'Inter-Regular', fontSize: 18, color: '#ff9a9a'}}>
+                {captureError}
+              </Text>
+            ) : null}
+            {captureState === 'queued' ? (
+              <Text style={{marginTop: 16, fontFamily: 'Inter-Regular', fontSize: 18, color: '#9ee6ae'}}>
+                {t('ps2.captureQueued')}
+              </Text>
+            ) : null}
           </motion.View>
         </View>
       </View>
@@ -258,13 +287,18 @@ function Related({games, onOpen}) {
 }
 
 export function Ps2GamePage({id}) {
+  const t = useT();
   const {pop, focusLater, push} = useNavActions();
   const [viewing, setViewing] = useState(null);
+  const [captureState, setCaptureState] = useState('idle');
+  const [captureError, setCaptureError] = useState('');
+  const captureTask = useRef(null);
   const games = usePs2Catalog();
   const game = games.find(item => item.id === id);
   useEffect(() => {
     loadPs2Details(id);
   }, [id]);
+  useEffect(() => () => captureTask.current?.cancel(), [id]);
   if (!game) return null;
   const about = game.about.filter(text => text.trim());
   const related = relatedTo(game, games);
@@ -272,11 +306,45 @@ export function Ps2GamePage({id}) {
     pop();
     return true;
   };
+  const detectDownload = async () => {
+    if (captureTask.current) return;
+    setCaptureError('');
+    setCaptureState('capturing');
+    try {
+      const task = BrowserCapture.captureArchive({timeoutSeconds: 180});
+      captureTask.current = task;
+      if (!Linking.openURL(game.pageUrl)) throw new Error(t('ps2.captureOpenFailed'));
+      const {url} = await task.done;
+      const format = /\.(zip|rar|7z)(?=$|[?&#])/i.exec(url)?.[1]?.toLowerCase();
+      if (!format) throw new Error(t('ps2.captureUnsupportedFile'));
+      const {host} = webURL(url);
+      const filename = `${game.title.replace(/[^a-z0-9 _.-]/gi, '').trim().slice(0, 120) || game.id}.${format}`;
+      downloadQueue().enqueue(
+        {...game, platform: 'ps2', titleId: game.id},
+        {id: `web-${Date.now()}`, provider: host, url, filename, format, category: 'game'},
+        storageRoots()[0]
+      );
+      setCaptureState('queued');
+    } catch (error) {
+      captureTask.current?.cancel();
+      setCaptureError(error?.message || t('ps2.captureFailed'));
+      setCaptureState('failed');
+    } finally {
+      captureTask.current = null;
+    }
+  };
   return (
     <FocusScope trap autoFocus onBack={back}>
       <View style={{position: 'relative', flex: 1}}>
         <ScrollView style={{flex: 1}}>
-          <Hero game={game} onBack={pop} onViewWeb={() => Linking.openURL(game.pageUrl)} />
+          <Hero
+            game={game}
+            onBack={pop}
+            onViewWeb={() => Linking.openURL(game.pageUrl)}
+            onDetectDownload={detectDownload}
+            captureState={captureState}
+            captureError={captureError}
+          />
           <View style={{paddingHorizontal: 48, paddingTop: 60, paddingBottom: 96}}>
             <View style={{flexDirection: 'row', gap: 84}}>
               <View style={{width: 1308, gap: 84}}>

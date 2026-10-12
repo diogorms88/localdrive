@@ -3,6 +3,7 @@
 // Read-only browser capture; original corresponding source is recorded in README.md.
 #include "browser_match.h"
 #include "browser_scan.h"
+#include <stdio.h>
 #include <string.h>
 _Static_assert(sizeof(((BrowserMatch *)0)->url) <= PROBE_MATCH_MAX, "Scanner overlap must cover encoded filenames");
 static bool boundary(unsigned char c) {
@@ -11,6 +12,41 @@ static bool boundary(unsigned char c) {
 }
 bool browser_match(void *context, const unsigned char *bytes, size_t length) {
     BrowserMatch *match = context;
+    if (!match->filename) {
+        for (size_t step = 1; step <= 2; step++) {
+            for (size_t i = 0; i + 8 * step <= length; i++) {
+                if ((i >= step && !boundary(bytes[i - step])) || bytes[i] != 'h') continue;
+                const char *schemes[] = {"https://", "http://"};
+                for (size_t scheme = 0; scheme < 2; scheme++) {
+                    const size_t size = strlen(schemes[scheme]);
+                    if ((size + 1) * step > length - i) continue;
+                    bool valid = true;
+                    for (size_t j = 0; j < size; j++) {
+                        if (bytes[i + j * step] != (unsigned char)schemes[scheme][j] ||
+                            (step == 2 && bytes[i + j * step + 1])) { valid = false; break; }
+                    }
+                    if (!valid || strcmp(schemes[scheme], "https://")) continue;
+                    char candidate[sizeof match->url];
+                    memcpy(candidate, schemes[scheme], size);
+                    for (size_t j = size; j < sizeof candidate && (j + 1) * step <= length - i; j++) {
+                        unsigned char c = bytes[i + j * step];
+                        if (step == 2 && bytes[i + j * step + 1]) break;
+                        if (boundary(c)) {
+                            candidate[j] = 0;
+                            if (browser_archive_url(candidate)) {
+                                memcpy(match->url, candidate, j + 1);
+                                return true;
+                            }
+                            break;
+                        }
+                        if (c < 33 || c > 126) break;
+                        candidate[j] = (char)c;
+                    }
+                }
+            }
+        }
+        return false;
+    }
     for (size_t which = 0; which < 2; which++) {
     const char *prefix = browser_capture_prefixes[which];
     const size_t plen = strlen(prefix);

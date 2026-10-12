@@ -8,4 +8,5 @@ typedef struct { const char *filename; char url[544]; } BrowserMatch;
 extern const char *const browser_capture_prefixes[2];
 const char *browser_capture_prefix(const char *url);
 bool browser_capture_url(const char *filename, const char *url);
+bool browser_archive_url(const char *url);
 bool browser_match(void *context, const unsigned char *bytes, size_t length);

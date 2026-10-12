@@ -433,5 +433,12 @@
   "capture.detail": "Volte aqui após apertar Download. O download começa automaticamente quando o arquivo é validado. A captura dura até 3 minutos.",
   "nav.fileSize": "Tamanho de arquivo",
   "ps2.allGames": "Todos os jogos de PS2",
-  "ps2.viewOnWeb": "Visualizar jogo na web"
+  "ps2.viewOnWeb": "Visualizar jogo na web",
+  "ps2.captureDownload": "Abrir e detectar download",
+  "ps2.captureWaiting": "Aguardando link…",
+  "ps2.captureInstructions": "Na página aberta, avance até o download do arquivo .zip, .rar ou .7z. Volte ao LocalDrive quando a fila for atualizada.",
+  "ps2.captureQueued": "Download identificado e enviado para a fila do PS2.",
+  "ps2.captureOpenFailed": "Não foi possível abrir o navegador do PS5.",
+  "ps2.captureUnsupportedFile": "O navegador não apresentou um link .zip, .rar ou .7z identificável.",
+  "ps2.captureFailed": "Não foi possível identificar o download."
 }

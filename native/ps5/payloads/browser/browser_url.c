@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Read-only browser capture; original corresponding source is recorded in README.md.
 #include "browser_match.h"
+#include <ctype.h>
 #include <string.h>
+#include <strings.h>
 static int hex(unsigned char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -39,4 +41,25 @@ bool browser_capture_url(const char *filename, const char *url) {
     } else if (!*expected || c != *expected++) return false;
   }
   return !*expected;
+}
+
+// Generic PS2 capture accepts only HTTPS URLs that visibly identify a ZIP, RAR or 7z file.
+// The URL may put the filename in a query parameter (for example download.php?file=game.7z&id=...).
+bool browser_archive_url(const char *url) {
+  if (!url || strncmp(url, "https://", 8) || !url[8]) return false;
+  const char *host_end = strpbrk(url + 8, "/?#");
+  if (!host_end || host_end == url + 8) return false;
+  for (const unsigned char *p = (const unsigned char *)url; *p; p++)
+    if (*p <= 32 || *p >= 127 || *p == '\\' || *p == '"' || *p == '<' || *p == '>') return false;
+  for (const char *p = host_end; *p; p++) {
+    if (*p != '.') continue;
+    const char *ext = p + 1;
+    const char *end = ext;
+    while (isalnum((unsigned char)*end)) end++;
+    if (!((end - ext == 3 && !strncasecmp(ext, "zip", 3)) ||
+          (end - ext == 3 && !strncasecmp(ext, "rar", 3)) ||
+          (end - ext == 2 && !strncasecmp(ext, "7z", 2)))) continue;
+    if (!*end || *end == '?' || *end == '&' || *end == '#') return true;
+  }
+  return false;
 }

@@ -385,6 +385,11 @@ export const BrowserCapture = Object.freeze({
     const id = host().browser.capture(prefix, suffix, timeoutSeconds);
     return networkTask(id, 'BrowserCapture.capture', '', 'browser');
   },
+  /** Captures a visible HTTPS URL whose path/query names a ZIP, RAR or 7z file (PS5 only). */
+  captureArchive({timeoutSeconds = 180} = {}) {
+    const id = host().browser.capture('archive', '', timeoutSeconds);
+    return networkTask(id, 'BrowserCapture.captureArchive', '', 'browser');
+  },
 });
 
 const pendingImages = new Map();
