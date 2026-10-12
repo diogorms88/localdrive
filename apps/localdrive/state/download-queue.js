@@ -12,6 +12,9 @@ const MAX_PARALLEL_DOWNLOADS = 3;
 
 export const BUSY = ['queued', ...ACTIVE];
 
+// Payload Manager scans /data/pldmgr and its subfolders for .elf and .bin payloads.
+export const payloadDir = root => `${root.replace(/\/+$/, '')}/pldmgr/payloads`;
+
 export const COMPLETE = [
   'downloaded',
   'file-downloaded',
@@ -161,6 +164,16 @@ export function createDownloadQueue({
     if (!job) throw new Error('Download is no longer in the queue.');
     return job;
   };
+  // `saveTo`, a folder under the storage root, takes a plain file there and an archive's contents
+  // there once extracted (homebrew payloads, emulator BIOS); the shared classifier still checks names.
+  const savedTo = (release, root) => {
+    const folder = release.saveTo;
+    if (!folder.startsWith(`${root.replace(/\/+$/, '')}/`) || folder.split('/').includes('..'))
+      throw new Error(`Downloads: saveTo ${folder} is outside ${root}`);
+    const checked = formats.artifact(release, root);
+    if (checked.nextAction !== 'downloaded') return checked;
+    return {...checked, directory: folder, destination: `${folder}/${release.filename}`};
+  };
   const artifactFor = (release, root) =>
     release.parts
       ? {
@@ -168,7 +181,9 @@ export function createDownloadQueue({
           destination: `${root}/downloads/extracted/${release.filename}`,
           nextAction: 'extracted'
         }
-      : formats.artifact(release, root);
+      : release.saveTo
+        ? savedTo(release, root)
+        : formats.artifact(release, root);
   function failOver(job, error) {
     if (
       job.written ||
@@ -497,7 +512,9 @@ export function createDownloadQueue({
     storageIdentity(job);
     const directory = `${job.root}/downloads/extracted`;
     fs.mkdir(directory, {recursive: true});
-    job.output || (job.output = `${directory}/${job.release.filename.replace(/[^a-z0-9_.-]/gi, '_')}`);
+    job.output ||
+      (job.output =
+        job.release.saveTo || `${directory}/${job.release.filename.replace(/[^a-z0-9_.-]/gi, '_')}`);
     if (job.publishTo && fs.exists(job.publishTo)) job.output = job.publishTo;
     return {
       sources: files,

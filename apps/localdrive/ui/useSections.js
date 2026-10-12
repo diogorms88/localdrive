@@ -47,7 +47,7 @@ export function useSections() {
   const underneath =
     top.name === 'downloads' || top.name === 'files' ? top.name : sectionOf(store, queryActive);
   const section =
-    top.name === 'search' ? 'search' : top.name === 'game' ? null : top.name === 'add' ? 'add' : underneath;
+    top.name === 'search' ? 'search' : top.name === 'game' ? null : top.name === 'add' || top.name === 'homebrew' ? 'add' : underneath;
   const topName = useRef(top.name);
   topName.current = top.name;
   const [on] = useState(() => ({

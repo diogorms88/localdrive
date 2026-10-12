@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {DownloadFormats, FileSystem, View, Text, Image, ScrollView, motion} from '@ps5-react/core';
+import {DownloadFormats, View, Text, Image, ScrollView, motion} from '@ps5-react/core';
 import {useT} from '../i18n/index.js';
 import {webURL} from '../state/download-sources.js';
 import {downloadQueue, storageRoots} from '../state/downloads.js';
@@ -42,36 +42,11 @@ function linkRelease(url) {
   return {game: {id, title, titleId: id}, release: {id, provider: host, url, filename, format}};
 }
 
-// A homebrew file goes to the downloads folder under its own name: an .elf stays an .elf.
-function homebrewRelease(item) {
-  const id = `local-${item.id}`;
-  const {host} = webURL(item.url);
-  return {
-    game: {id, title: item.name, titleId: id},
-    release: {
-      id: `${item.id}-${Date.now()}`,
-      provider: host,
-      url: item.url,
-      filename: item.filename,
-      format: 'binary'
-    }
-  };
-}
-
-const destinationOf = item => {
-  try {
-    return DownloadFormats.artifact({format: 'binary', filename: item.filename}, storageRoots()[0])
-      .destination;
-  } catch {
-    return null;
-  }
-};
-
-function HomebrewCard({item, onDownload, status}) {
+function HomebrewCard({item, onOpen}) {
   const t = useT();
   return (
     <motion.View
-      onPress={() => onDownload(item)}
+      onPress={() => onOpen(item)}
       focusKey={`homebrew:${item.id}`}
       autoFocus={item === HOMEBREW[0]}
       whileFocus={lift}
@@ -99,7 +74,7 @@ function HomebrewCard({item, onDownload, status}) {
           {t(item.description)}
         </Text>
         <Text style={{fontFamily: 'Inter-Regular', fontSize: 20, color: colors.subtle, lineHeight: 27}}>
-          {status ?? `${item.filename} \xB7 ${item.source}`}
+          {`${item.filename} \xB7 ${item.source}`}
         </Text>
       </View>
     </motion.View>
@@ -110,23 +85,11 @@ export function HomebrewScreen() {
   const t = useT();
   const nav = useNavActions();
   const [dialog, setDialog] = useState(false);
-  const [notes, setNotes] = useState({});
   const enqueue = ({game, release}) => {
     downloadQueue().enqueue(game, release, storageRoots()[0]);
     nav.push({name: 'downloads'}, 'nav:addGame');
   };
-  const download = item => {
-    const path = destinationOf(item);
-    if (path && FileSystem.exists(path)) {
-      setNotes(previous => ({...previous, [item.id]: t('homebrew.downloaded', {path})}));
-      return;
-    }
-    try {
-      enqueue(homebrewRelease(item));
-    } catch (failure) {
-      setNotes(previous => ({...previous, [item.id]: failure.message}));
-    }
-  };
+  const open = item => nav.push({name: 'homebrew', id: item.id}, `homebrew:${item.id}`);
   return (
     <View style={{flex: 1}}>
       <ScrollView style={{flex: 1}}>
@@ -157,7 +120,7 @@ export function HomebrewScreen() {
           </View>
           <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 48}}>
             {HOMEBREW.map(item => (
-              <HomebrewCard key={item.id} item={item} onDownload={download} status={notes[item.id]} />
+              <HomebrewCard key={item.id} item={item} onOpen={open} />
             ))}
           </View>
           <View style={{flexDirection: 'row'}}>

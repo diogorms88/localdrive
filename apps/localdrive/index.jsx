@@ -12,6 +12,7 @@ import {useInterfaceSounds} from './ui/sounds.js';
 import {GameScreen} from './game/index.jsx';
 import {SearchScreen} from './search/index.jsx';
 import {HomebrewScreen} from './homebrew/HomebrewScreen.jsx';
+import {HomebrewPage} from './homebrew/HomebrewPage.jsx';
 import {useInterfaceHaptics} from './ui/haptics.js';
 import {Header} from './ui/Header.jsx';
 import {Splash} from './ui/Splash.jsx';
@@ -27,6 +28,7 @@ function Screen({screen: screen}) {
   if (screen.name === 'downloads') return <DownloadsScreen onBack={pop} onOpenGame={openGame} />;
   if (screen.name === 'files') return <FilesScreen onBack={pop} />;
   if (screen.name === 'add') return <HomebrewScreen />;
+  if (screen.name === 'homebrew') return <HomebrewPage id={screen.id} />;
   return <SearchScreen onBack={pop} onOpenGame={openCard} />;
 }
 
