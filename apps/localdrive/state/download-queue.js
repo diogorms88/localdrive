@@ -1104,8 +1104,16 @@ export function createDownloadQueue({
       const id = `${game.id}/${release.id}`;
       const existing = jobs.find(job => job.id === id);
       if (existing) return existing.id;
-      if (release.unavailableReason) throw new Error(release.unavailableReason);
-      const artifact = artifactFor(release, root);
+      // PS2 backup downloads always go to PCSX2's games folder; other platforms retain their
+      // selected storage root and their existing install flow.
+      const queueRoot = game.platform === 'ps2' && platform === 'ps5' ? '/data' : root;
+      const ps2Folder = `${queueRoot}/PCSX2/games`;
+      const queuedRelease = game.platform === 'ps2' ? {...release, saveTo: ps2Folder} : release;
+      const queuedAlternatives = alternatives.map(item =>
+        game.platform === 'ps2' ? {...item, saveTo: ps2Folder} : item
+      );
+      if (queuedRelease.unavailableReason) throw new Error(queuedRelease.unavailableReason);
+      const artifact = artifactFor(queuedRelease, queueRoot);
       if (fs.exists(artifact.destination))
         throw new Error('Destination already exists. Choose another release or inspect the existing file.');
       if (jobs.some(job => job.artifact.destination === artifact.destination))
@@ -1114,13 +1122,13 @@ export function createDownloadQueue({
       if (jobs.length === 32) jobs = jobs.filter(job => !COMPLETE.includes(job.state));
       if (jobs.length === 32)
         throw new Error('Queue has 32 unfinished downloads. Finish or remove one first.');
-      if (release.sizeBytes) {
-        const pending = holding(root);
+      if (queuedRelease.sizeBytes) {
+        const pending = holding(queueRoot);
         const held = orphan
-          ? Math.min(fs.stat(`${artifact.destination}.part`)?.size || 0, release.sizeBytes)
+          ? Math.min(fs.stat(`${artifact.destination}.part`)?.size || 0, queuedRelease.sizeBytes)
           : 0;
-        const need = stillNeeded({release, artifact: artifact, total: release.sizeBytes, written: held});
-        const shortfall = spaceShortfall(root, need, fs.diskUsage(root).free, pending);
+        const need = stillNeeded({release: queuedRelease, artifact: artifact, total: queuedRelease.sizeBytes, written: held});
+        const shortfall = spaceShortfall(queueRoot, need, fs.diskUsage(queueRoot).free, pending);
         if (shortfall) throw new Error(shortfall);
       }
       jobs.push({
@@ -1128,10 +1136,10 @@ export function createDownloadQueue({
         gameId: game.id,
         titleId: game.titleId || game.id,
         title: game.title,
-        release: {...release},
+        release: {...queuedRelease},
         requestedId: release.id,
-        fallbacks: alternatives.slice(0, 4).map(item => ({...item})),
-        root: root,
+        fallbacks: queuedAlternatives.slice(0, 4).map(item => ({...item})),
+        root: queueRoot,
         artifact: artifact,
         state: 'queued',
         written: 0,

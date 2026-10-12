@@ -28,6 +28,8 @@ export function Header({children}) {
   const nav = useNavActions();
   const {top} = useNavState();
   const [browsing, setBrowsing] = useState(false);
+  const [choosingPlatform, setChoosingPlatform] = useState(false);
+  const platform = section === 'platform' && (top.name === 'ps2' ? 'ps2' : filters.platform[0]);
   const [choosingLanguage, setChoosingLanguage] = useState(false);
   const immersive = useIsImmersive();
   const [layouts, track] = useNavLayouts();
@@ -40,9 +42,15 @@ export function Header({children}) {
       return true;
     }
     if (action !== 'l1' && action !== 'r1') return false;
+    const open = browsing ? 'catalog' : choosingPlatform ? 'platform' : null;
     setBrowsing(false);
-    if (action === 'r1' && section === 'files') setChoosingLanguage(true);
-    else step(action === 'r1');
+    setChoosingPlatform(false);
+    if (action === 'r1' && section === 'files' && !open) setChoosingLanguage(true);
+    else
+      step(action === 'r1', {
+        open,
+        openMenu: name => (name === 'catalog' ? setBrowsing(true) : setChoosingPlatform(true))
+      });
     return true;
   };
   const onBack = () => {
@@ -135,6 +143,37 @@ export function Header({children}) {
                       label={t('nav.fileSize')}
                       checked={section === 'catalog' && !activeCount(filters) && sort === 'smallest'}
                       onSelect={() => on.show(NO_FILTERS, 'smallest')}
+                    />
+                  </Menu>
+                </View>
+                <View style={{position: 'relative'}}>
+                  <NavItem
+                    focusKey={keyOf('platform')}
+                    label={t('nav.platform')}
+                    trailing={choosingPlatform ? 'chevronUp' : 'chevronDown'}
+                    current={section === 'platform'}
+                    onPress={() => setChoosingPlatform(open => !open)}
+                    onLayout={track('platform')}
+                    nextFocusDown={down}
+                  />
+                  <Menu open={choosingPlatform} onClose={() => setChoosingPlatform(false)} rows={3}>
+                    <MenuItem
+                      label="PS4"
+                      checked={platform === 'ps4'}
+                      autoFocus={platform !== 'ps5' && platform !== 'ps2'}
+                      onSelect={() => on.platform('ps4')}
+                    />
+                    <MenuItem
+                      label="PS5"
+                      checked={platform === 'ps5'}
+                      autoFocus={platform === 'ps5'}
+                      onSelect={() => on.platform('ps5')}
+                    />
+                    <MenuItem
+                      label="PS2"
+                      checked={platform === 'ps2'}
+                      autoFocus={platform === 'ps2'}
+                      onSelect={on.ps2}
                     />
                   </Menu>
                 </View>

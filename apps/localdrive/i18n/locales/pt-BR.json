@@ -236,6 +236,8 @@
   "game.back.add": "HomeBrew",
   "game.back.browse": "Biblioteca",
   "game.back.downloads": "Downloads",
+  "game.back.ps2": "PS2",
+  "game.back.ps2game": "PS2",
   "game.back.search": "Busca",
   "game.details": "Detalhes",
   "game.facts.downloadSize": "Tamanho do download",
@@ -343,9 +345,15 @@
   "nav.discover": "Descobrir",
   "nav.files": "Arquivos",
   "nav.new": "Lançamentos",
+  "nav.platform": "Plataforma",
   "nav.addGame": "HomeBrew",
   "nav.search": "Busca",
   "nav.top": "Top",
+  "ps2.classics": "Clássicos",
+  "ps2.facts.developer": "Desenvolvedora",
+  "ps2.facts.languages": "Idiomas",
+  "ps2.facts.region": "Região",
+  "ps2.popular": "Populares no PS2",
   "search.noMatch": "Nenhum jogo corresponde a “{query}”",
   "search.placeholder": "Buscar biblioteca",
   "search.popular": "Popular",
@@ -423,5 +431,7 @@
   "capture.capturing": "Passe a verificação e aperte Download",
   "capture.validating": "Conferindo o arquivo capturado…",
   "capture.detail": "Volte aqui após apertar Download. O download começa automaticamente quando o arquivo é validado. A captura dura até 3 minutos.",
-  "nav.fileSize": "Tamanho de arquivo"
+  "nav.fileSize": "Tamanho de arquivo",
+  "ps2.allGames": "Todos os jogos de PS2",
+  "ps2.viewOnWeb": "Visualizar jogo na web"
 }

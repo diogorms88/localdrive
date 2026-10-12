@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Full CDRomance PS2 catalog
+
+- Bundled all 3,341 game listings across CDRomance PS2 pages 1–112 into the PS2 tab and added them to
+  the shared game-name search. The catalog uses a virtualized grid and loads detail metadata on demand.
+- The PS2 catalog reads titles, covers, descriptions, screenshots and game information only; it does not
+  extract or display download links. The PS2 game page also has a “View game on the web” button that opens
+  that game's CDRomance page in the system browser.
+- PS2 queue entries route ZIP and other archive contents to `/data/PCSX2/games` on PS5. Plain PS2
+  files are saved there as well; PS4/PS5 queue destinations and installation flow remain unchanged.
+
 ## LocalDrive v0.0.6
 
 - Renamed the “Add game” tab to “HomeBrew” and removed its icon.

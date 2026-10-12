@@ -12,10 +12,23 @@ const KEYS = {
   favorites: 'nav:favorites',
   downloads: 'nav:downloads',
   files: 'nav:files',
-  add: 'nav:addGame'
+  add: 'nav:addGame',
+  platform: 'nav:platform'
 };
 
-const TABS = ['search', 'discover', 'top', 'new', 'add', 'favorites', 'downloads', 'files'];
+// L1/R1 order, as the header shows them. Browse and Platform are menus: stepping onto one opens it.
+const TABS = [
+  'search',
+  'discover',
+  'catalog',
+  'platform',
+  'top',
+  'new',
+  'add',
+  'favorites',
+  'downloads',
+  'files'
+];
 
 export function useShowLibrary() {
   const store = useStoreActions();
@@ -34,6 +47,9 @@ function sectionOf({filters, sort}, query) {
   if (sort === 'rating') return 'top';
   if (sort === 'newest') return 'new';
   if (sort === 'smallest') return 'catalog';
+  // Only a platform chosen: the Platform tab's own view of the library.
+  if (filters.platform.length && activeCount(filters) === filters.platform.length && !query)
+    return 'platform';
   if (activeCount(filters) > 0 || query) return 'catalog';
   return 'discover';
 }
@@ -47,7 +63,15 @@ export function useSections() {
   const underneath =
     top.name === 'downloads' || top.name === 'files' ? top.name : sectionOf(store, queryActive);
   const section =
-    top.name === 'search' ? 'search' : top.name === 'game' ? null : top.name === 'add' || top.name === 'homebrew' ? 'add' : underneath;
+    top.name === 'search'
+      ? 'search'
+      : top.name === 'game'
+        ? null
+        : top.name === 'add' || top.name === 'homebrew'
+          ? 'add'
+          : top.name === 'ps2' || top.name === 'ps2game'
+            ? 'platform'
+            : underneath;
   const topName = useRef(top.name);
   topName.current = top.name;
   const [on] = useState(() => ({
@@ -57,15 +81,21 @@ export function useSections() {
     top: () => show(NO_FILTERS, 'rating'),
     new: () => show(NO_FILTERS, 'newest'),
     add: () => topName.current !== 'add' && nav.push({name: 'add'}, 'nav:addGame'),
+    platform: id => show({...NO_FILTERS, platform: [id]}, 'relevance'),
+    ps2: () => topName.current !== 'ps2' && nav.push({name: 'ps2'}, 'nav:platform'),
     favorites: () => show({...NO_FILTERS, wishlist: true}, 'relevance'),
     downloads: () => topName.current !== 'downloads' && nav.push({name: 'downloads'}, 'nav:downloads'),
     files: () => topName.current !== 'files' && nav.push({name: 'files'}, 'nav:files')
   }));
-  const step = forward => {
-    const current = top.name === 'search' || top.name === 'add' ? top.name : underneath;
-    const at = current === 'catalog' ? 1.5 : TABS.indexOf(current);
-    const next = TABS[forward ? Math.floor(at) + 1 : Math.ceil(at) - 1];
+  // `open` is the menu open in the header, if any: stepping goes on from it, not from the section.
+  const step = (forward, {open, openMenu}) => {
+    const current = open ?? section ?? underneath;
+    const next = TABS[TABS.indexOf(current) + (forward ? 1 : -1)];
     if (!next) return;
+    if (next === 'catalog' || next === 'platform') {
+      openMenu(next);
+      return;
+    }
     if (next === 'downloads' || next === 'files') {
       store.setQuery('');
       nav.home();

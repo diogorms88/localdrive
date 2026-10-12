@@ -66,7 +66,7 @@ export function CardFocus({focused, width, height, platforms}) {
   return (
     <>
       <AnimatePresence>
-        {focused && (
+        {focused && platforms?.length > 0 && (
           <motion.View key={'tag'} {...fade} style={{position: 'absolute', bottom: 12, left: 12}}>
             <PlatformBadge platforms={platforms} />
           </motion.View>

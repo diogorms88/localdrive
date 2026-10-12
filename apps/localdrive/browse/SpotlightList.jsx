@@ -65,23 +65,23 @@ function Title({title, active: active}) {
   );
 }
 
-const Item = memo(function Item({game, index, active: active, progress, select, hold}) {
+const Item = memo(function Item({game, index, active: active, progress, select, hold, prefix}) {
   const {rtl} = useLocale();
   return (
     <View
-      focusKey={`spotlight:${index}`}
+      focusKey={`${prefix}:${index}`}
       selected={active}
       nextFocusUp={index === 0 ? 'nav:current' : void 0}
-      {...focusStart(rtl, 'spotlight:wish')}
-      {...focusEnd(rtl, `spotlight:${index}`)}
+      {...focusStart(rtl, `${prefix}:wish`)}
+      {...focusEnd(rtl, `${prefix}:${index}`)}
       onFocus={() => {
         select(index);
         hold(true);
-        lightGame(`spotlight:${index}`, game);
+        lightGame(`${prefix}:${index}`, game);
       }}
       onBlur={() => {
         hold(false);
-        unlight(`spotlight:${index}`);
+        unlight(`${prefix}:${index}`);
       }}
       onPress={() => select(index)}
       style={[
@@ -106,7 +106,8 @@ const Item = memo(function Item({game, index, active: active, progress, select, 
   );
 });
 
-export function SpotlightList({games: games, slides}) {
+// `prefix` keeps the focus keys apart when another page shows its own spotlight.
+export function SpotlightList({games: games, slides, prefix = 'spotlight'}) {
   const {active: active, left, paused, select, hold} = slides;
   const progress = useMemo(() => ({left, paused}), [left, paused]);
   return (
@@ -120,6 +121,7 @@ export function SpotlightList({games: games, slides}) {
           progress={index === active ? progress : null}
           select={select}
           hold={hold}
+          prefix={prefix}
         />
       ))}
     </View>

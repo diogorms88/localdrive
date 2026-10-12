@@ -13,14 +13,19 @@ import {GameScreen} from './game/index.jsx';
 import {SearchScreen} from './search/index.jsx';
 import {HomebrewScreen} from './homebrew/HomebrewScreen.jsx';
 import {HomebrewPage} from './homebrew/HomebrewPage.jsx';
+import {Ps2Screen} from './ps2/Ps2Screen.jsx';
+import {Ps2GamePage} from './ps2/Ps2GamePage.jsx';
 import {useInterfaceHaptics} from './ui/haptics.js';
 import {Header} from './ui/Header.jsx';
 import {Splash} from './ui/Splash.jsx';
 import {UpdateDialog} from './ui/UpdateDialog.jsx';
 
 function Screen({screen: screen}) {
-  const {openGame, pop} = useNavActions();
-  const openCard = game => openGame(game.id, `card:${game.id}`);
+  const {openGame, pop, push} = useNavActions();
+  const openCard = game =>
+    game.platform === 'ps2'
+      ? push({name: 'ps2game', id: game.id}, 'search-results')
+      : openGame(game.id, `card:${game.id}`);
   if (screen.name === 'game')
     return (
       <GameScreen game={getGame(screen.id)} download={screen.download} onBack={pop} onOpenGame={openCard} />
@@ -29,6 +34,8 @@ function Screen({screen: screen}) {
   if (screen.name === 'files') return <FilesScreen onBack={pop} />;
   if (screen.name === 'add') return <HomebrewScreen />;
   if (screen.name === 'homebrew') return <HomebrewPage id={screen.id} />;
+  if (screen.name === 'ps2') return <Ps2Screen />;
+  if (screen.name === 'ps2game') return <Ps2GamePage id={screen.id} />;
   return <SearchScreen onBack={pop} onOpenGame={openCard} />;
 }
 
@@ -61,7 +68,7 @@ function App() {
   }, []);
   const {top} = useNavState();
   const onBrowse = top.name === 'browse';
-  const key = top.name === 'game' ? `game:${top.id}` : top.name;
+  const key = top.name === 'game' || top.name === 'ps2game' ? `${top.name}:${top.id}` : top.name;
   const immersive = useIsImmersive();
   const {rtl} = useLocale();
   return (
