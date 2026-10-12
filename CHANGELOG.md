@@ -1,5 +1,9 @@
 # Changelog
 
+## LocalDrive v0.0.4
+
+- Localized the “Add game” navigation label as “Adicionar Jogos” in Brazilian Portuguese.
+
 ## Unreleased — render thread freed during downloads, RAR sets checked before decoding
 
 - `Archives.inspect` reads a RAR's first file header, then walks the next ones for about 100 ms
