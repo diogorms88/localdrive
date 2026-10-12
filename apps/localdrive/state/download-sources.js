@@ -26,6 +26,10 @@ export function sourceKind(release) {
   const value = release.browserUrl || release.url;
   if (!value) return 'unavailable';
   const {host: host, path} = webURL(value);
+  // A URL captured from the PS2 page's actual download request is already the
+  // browser-resolved file URL. Do not send it back through a provider-page
+  // resolver (which would leave it waiting for browser verification again).
+  if (release.capturedDownloadUrl) return 'direct';
   const provider = Object.keys(hosts).find(name => hosts[name].some(domain => isHost(host, domain)));
   if (provider === 'mediafire' && host.startsWith('download')) return 'direct';
   if (provider === 'vikingfile' && /^\/d\//.test(path) && !release.browserUrl) return 'direct';

@@ -321,7 +321,15 @@ export function Ps2GamePage({id}) {
       const filename = `${game.title.replace(/[^a-z0-9 _.-]/gi, '').trim().slice(0, 120) || game.id}.${format}`;
       downloadQueue().enqueue(
         {...game, platform: 'ps2', titleId: game.id},
-        {id: `web-${Date.now()}`, provider: host, url, filename, format, category: 'game'},
+        {
+          id: `web-${Date.now()}`,
+          provider: host,
+          url,
+          filename,
+          format,
+          category: 'game',
+          capturedDownloadUrl: true
+        },
         storageRoots()[0]
       );
       setCaptureState('queued');
