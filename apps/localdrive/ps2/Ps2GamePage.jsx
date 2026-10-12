@@ -328,7 +328,9 @@ export function Ps2GamePage({id}) {
           filename,
           format,
           category: 'game',
-          capturedDownloadUrl: true
+          capturedDownloadUrl: true,
+          // CDRomance answers every connection beyond the first per IP with a redirect to 503.html.
+          connections: 1
         },
         storageRoots()[0]
       );

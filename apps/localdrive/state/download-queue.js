@@ -351,7 +351,8 @@ export function createDownloadQueue({
         ...job.options,
         rejectHtml: true,
         mirrors: void 0,
-        connections: Math.max(8, Math.floor(64 / Math.max(1, active.size))),
+        // A release may cap its connections when the host refuses parallel ranges (CDRomance allows one per IP).
+        connections: job.release.connections || Math.max(8, Math.floor(64 / Math.max(1, active.size))),
         adaptive: true,
         rangeBytes: 32 * 1024 * 1024,
         destination: job.downloadDestination,

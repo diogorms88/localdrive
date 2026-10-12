@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Full CDRomance PS2 catalog
+## LocalDrive v0.0.14 — Full CDRomance PS2 catalog
 
 - Bundled all 3,341 game listings across CDRomance PS2 pages 1–112 into the PS2 tab and added them to
   the shared game-name search. The catalog uses a virtualized grid and loads detail metadata on demand.
@@ -13,6 +13,8 @@
   captures a visible HTTPS ZIP/RAR/7z URL, and enqueues it for extraction into `/data/PCSX2/games`.
 - Fixed captured CDRomance links stalling in the queue: the “Show Links” HTML response stores the URL with
   `&amp;` separators, which the server rejects with HTTP 400. The capture now decodes them to `&`.
+- Fixed captured CDRomance downloads that queued but never started: the server allows one connection per
+  IP and redirects the rest to `503.html`. Captured PS2 links now download over a single connection.
 
 ## LocalDrive v0.0.6
 
