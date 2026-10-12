@@ -4,7 +4,6 @@
 #include "browser_match.h"
 #include <ctype.h>
 #include <string.h>
-#include <strings.h>
 static int hex(unsigned char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -56,9 +55,12 @@ bool browser_archive_url(const char *url) {
     const char *ext = p + 1;
     const char *end = ext;
     while (isalnum((unsigned char)*end)) end++;
-    if (!((end - ext == 3 && !strncasecmp(ext, "zip", 3)) ||
-          (end - ext == 3 && !strncasecmp(ext, "rar", 3)) ||
-          (end - ext == 2 && !strncasecmp(ext, "7z", 2)))) continue;
+    const bool zip = end - ext == 3 && tolower((unsigned char)ext[0]) == 'z' &&
+      tolower((unsigned char)ext[1]) == 'i' && tolower((unsigned char)ext[2]) == 'p';
+    const bool rar = end - ext == 3 && tolower((unsigned char)ext[0]) == 'r' &&
+      tolower((unsigned char)ext[1]) == 'a' && tolower((unsigned char)ext[2]) == 'r';
+    const bool seven_zip = end - ext == 2 && ext[0] == '7' && tolower((unsigned char)ext[1]) == 'z';
+    if (!(zip || rar || seven_zip)) continue;
     if (!*end || *end == '?' || *end == '&' || *end == '#') return true;
   }
   return false;

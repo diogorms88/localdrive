@@ -13,3 +13,8 @@ used to start a download.
 The listing snapshot is bundled, so the full catalog appears without making 112 requests on the
 console. Adding newer site listings requires regenerating `catalog.js`; game detail metadata remains
 loaded on demand.
+
+On PS5, **Open and detect download** arms the native browser capture before opening the selected
+game page. It forwards a visible HTTPS URL ending in `.zip`, `.rar` or `.7z` to the regular queue;
+the queue extracts it to `/data/PCSX2/games`. This capture is not available in the desktop preview,
+does not observe click events, and cannot identify providers that hide the archive extension.

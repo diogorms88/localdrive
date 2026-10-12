@@ -53,7 +53,7 @@ int main(void) {
   char magic[8], prefix[64], suffix[162], seconds[8];
   signal(SIGPIPE, SIG_IGN);
   if (!line(magic, sizeof magic) || strcmp(magic, "BRC1") || !line(prefix, sizeof prefix) ||
-      (!strcmp(prefix, "archive") ? false : strcmp(prefix, "https://vikingfile.com/d/")) ||
+      (strcmp(prefix, "archive") && strcmp(prefix, "https://vikingfile.com/d/")) ||
       !line(suffix, sizeof suffix) || !line(seconds, sizeof seconds)) return fail("Invalid capture request.");
   const bool archive_mode = !strcmp(prefix, "archive");
   if ((!archive_mode && suffix[0] != '/') || (archive_mode && suffix[0])) return fail("Invalid capture request.");
