@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Read-only browser capture; original corresponding source is recorded in README.md.
 #include "browser_match.h"
-#include <ctype.h>
 #include <string.h>
+#include <strings.h>
 static int hex(unsigned char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -42,26 +42,41 @@ bool browser_capture_url(const char *filename, const char *url) {
   return !*expected;
 }
 
-// Generic PS2 capture accepts only HTTPS URLs that visibly identify a ZIP, RAR or 7z file.
-// The URL may put the filename in a query parameter (for example download.php?file=game.7z&id=...).
+static bool archive_name(const char *value, size_t length) {
+  for (size_t i = 0; i < length; i++) {
+    const size_t left = length - i;
+    if ((left == 4 && !strncasecmp(value + i, ".zip", 4)) ||
+        (left == 4 && !strncasecmp(value + i, ".rar", 4)) ||
+        (left == 3 && !strncasecmp(value + i, ".7z", 3))) return true;
+  }
+  return false;
+}
+
+// PS2 capture is limited to CDRomance's actual file endpoint so the game page
+// or a text fragment containing an archive name cannot be mistaken for the link.
+static bool cdromance_download(const char *url, const char *host_end) {
+  const char *host = url + 8;
+  const size_t host_length = (size_t)(host_end - host);
+  static const char suffix[] = ".cdromance.org";
+  if (host_length <= sizeof suffix - 1 || strncmp(host, "dl", 2) ||
+      strncasecmp(host + host_length - (sizeof suffix - 1), suffix, sizeof suffix - 1)) return false;
+  if (strncmp(host_end, "/download.php?", 14)) return false;
+  const char *query = host_end + 14;
+  while (*query && *query != '#') {
+    const char *end = query;
+    while (*end && *end != '&' && *end != '#') end++;
+    if ((size_t)(end - query) > 5 && !strncmp(query, "file=", 5) &&
+        archive_name(query + 5, (size_t)(end - query - 5))) return true;
+    query = *end == '&' ? end + 1 : end;
+  }
+  return false;
+}
+
 bool browser_archive_url(const char *url) {
   if (!url || strncmp(url, "https://", 8) || !url[8]) return false;
   const char *host_end = strpbrk(url + 8, "/?#");
   if (!host_end || host_end == url + 8) return false;
   for (const unsigned char *p = (const unsigned char *)url; *p; p++)
     if (*p <= 32 || *p >= 127 || *p == '\\' || *p == '"' || *p == '<' || *p == '>') return false;
-  for (const char *p = host_end; *p; p++) {
-    if (*p != '.') continue;
-    const char *ext = p + 1;
-    const char *end = ext;
-    while (isalnum((unsigned char)*end)) end++;
-    const bool zip = end - ext == 3 && tolower((unsigned char)ext[0]) == 'z' &&
-      tolower((unsigned char)ext[1]) == 'i' && tolower((unsigned char)ext[2]) == 'p';
-    const bool rar = end - ext == 3 && tolower((unsigned char)ext[0]) == 'r' &&
-      tolower((unsigned char)ext[1]) == 'a' && tolower((unsigned char)ext[2]) == 'r';
-    const bool seven_zip = end - ext == 2 && ext[0] == '7' && tolower((unsigned char)ext[1]) == 'z';
-    if (!(zip || rar || seven_zip)) continue;
-    if (!*end || *end == '?' || *end == '&' || *end == '#') return true;
-  }
-  return false;
+  return cdromance_download(url, host_end);
 }

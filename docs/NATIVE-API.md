@@ -503,10 +503,12 @@ localhost ELF loader on port 9021. The desktop returns a failed task explaining
 that a PS5 is required. `capture` remains limited to the Vikingfile HTTPS host;
 its suffix is `/` plus a filename of at most 160 UTF-8 bytes without controls,
 slashes, backslashes or `..`. LocalDrive's PS2 flow uses the additive
-`captureArchive({timeoutSeconds})` call: it returns the first complete HTTPS URL
-visible to the browser scanner whose path or query identifies a `.zip`, `.rar`
-or `.7z` file. This mode does not report clicks and may not recognize providers
-that hide the file extension. The deadline is an integer from 1 to 180 seconds.
+`captureArchive({timeoutSeconds})` call: it returns the first complete HTTPS
+CDRomance `dl*.cdromance.org/download.php?file=...` URL visible to the browser
+scanner when the `file` parameter names a `.zip`, `.rar` or `.7z` archive. This
+avoids mistaking the game page or a text fragment for the final file URL. This
+mode does not report clicks and may not recognize providers that hide the file
+extension. The deadline is an integer from 1 to 180 seconds.
 Snapshots have `id`, `state`, `error` and a matching `url` on completion.
 `cancel()` shuts down the connection, stops the payload's next read, and
 rejects `done` with `AbortError`. Host exit stops and joins the worker.
