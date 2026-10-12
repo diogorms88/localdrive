@@ -13,6 +13,7 @@ import {SpotlightList} from '../browse/SpotlightList.jsx';
 import {useSlides} from '../browse/useSlides.js';
 import {loadPs2Details, usePs2Catalog} from './source.js';
 import {ps2Browse} from './library.js';
+import {PS2_GAMES} from './catalog.js';
 import '../assets/Inter-Regular.ttf';
 
 // The PS2 section uses a virtualized grid so the complete catalog can be browsed smoothly.
@@ -121,6 +122,12 @@ function Spotlight({games}) {
   const slides = useSlides(games.length, shown);
   const open = useOpenGame();
   const game = games[slides.active];
+  // Fetch the web page of the slide on screen and the next one only, not all five at once.
+  const nextId = games[(slides.active + 1) % games.length]?.id;
+  useEffect(() => {
+    if (game) loadPs2Details(game.id);
+    if (nextId) loadPs2Details(nextId);
+  }, [game?.id, nextId]);
   const {toggleWish} = useStoreActions();
   const wished = useWishlist().includes(game?.id);
   if (!game) return null;
@@ -221,14 +228,16 @@ function pickFeatured(games) {
   return pool.slice(0, 5).map(game => game.id);
 }
 
-export function Ps2Screen() {
+// Only the spotlight follows the live catalog (its art comes from each game's web page). The other
+// sections use the bundled listing, so a game page arriving does not recompute 3,341 games.
+function FeaturedSpotlight() {
   const games = usePs2Catalog();
   featuredIds ??= pickFeatured(games);
-  const featured = featuredIds.map(id => games.find(game => game.id === id)).filter(Boolean);
-  const catalogKey = games.map(game => game.id).join('|');
-  useEffect(() => {
-    for (const game of featured) loadPs2Details(game.id);
-  }, [catalogKey]);
+  return <Spotlight games={featuredIds.map(id => games.find(game => game.id === id)).filter(Boolean)} />;
+}
+
+export function Ps2Screen() {
+  const games = PS2_GAMES;
   const [filtering, setFiltering] = useState(false);
   const onAction = useFavoriteAction();
   return (
@@ -236,7 +245,7 @@ export function Ps2Screen() {
       <FocusScope trap onAction={onAction}>
         <ScrollView style={{flex: 1, gap: 84, paddingHorizontal: 48}}>
           <View scrollAnchor style={{gap: 24, paddingTop: 36}}>
-            <Spotlight games={featured} />
+            <FeaturedSpotlight />
           </View>
           <Ps2PopularRail games={games} />
           <Ps2RecentRail games={games} />

@@ -1,5 +1,15 @@
 # Changelog
 
+## LocalDrive v0.0.18
+
+- The PS2 tab loads less at once, so a game page's cover, backdrop and screenshots are no longer stuck
+  behind it: cards no longer fetch each game's web page when focused, the spotlight fetches only the
+  slide on screen and the next one, and the tab's sections no longer recompute all 3,341 games each
+  time a game page arrives. Cards keep the small listing cover; the full-size cover is only drawn on
+  the game page.
+- PS2 game pages read the release date, publisher, region, genres and languages from CDRomance's
+  information table again, and no longer show the site's disclaimer as part of the description.
+
 ## LocalDrive v0.0.17
 
 - The launch animation shows the new LocalDrive icon and name in place of the old dial logo.

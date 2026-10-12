@@ -50,10 +50,10 @@ function applyDetails(game, detail) {
     languages: detail.languages || game.languages,
     shortDescription: detail.about[0] || game.shortDescription,
     shots: detail.shots.length ? detail.shots : game.shots,
+    // Cards keep the listing's small cover; the full-size `poster` is only drawn on the game page.
     art: {
       ...game.art,
-      coverFallbacks: game.art.cover ? [game.art.cover] : [],
-      cover: detail.cover || game.art.cover,
+      poster: detail.cover || game.art.poster,
       hero: detail.shots[0]?.url || game.art.hero
     }
   };
@@ -70,8 +70,10 @@ function parseDetail(html) {
   const info = {};
   const rows = infoMatch ? [...infoMatch[1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)] : [];
   for (const row of rows) {
-    const cells = [...row[1].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)].map(match => textOf(match[1]));
-    if (cells.length > 1) info[cells[0].replace(/:$/, '').toLowerCase()] = cells.slice(1).join(' ');
+    // Each row is a <th> label followed by its <td> value.
+    const cells = [...row[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map(match => textOf(match[1]));
+    // The table's heading row has no </tr>, so it joins the first row: read the last label and value.
+    if (cells.length > 1) info[cells.at(-2).replace(/:$/, '').toLowerCase()] = cells.at(-1);
   }
 
   const imageTags = [...source.matchAll(/<img\b[^>]*>/gi)].map(match => match[0]);
@@ -87,7 +89,7 @@ function parseDetail(html) {
   const descriptionArea = descriptionStart >= 0 ? source.slice(descriptionStart, descriptionStart + 24000) : '';
   const about = [...descriptionArea.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
     .map(match => textOf(match[1]))
-    .filter(text => text.length > 50 && text !== text.toUpperCase())
+    .filter(text => text.length > 50 && text !== text.toUpperCase() && !/^disclaimer:/i.test(text))
     .slice(0, 4);
   const ogImage = source.match(/<meta\b[^>]*property=["']og:image["'][^>]*>/i)?.[0] || '';
   const date = (info['game release'] || '').match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] || '';

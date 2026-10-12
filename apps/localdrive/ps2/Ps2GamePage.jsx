@@ -40,6 +40,12 @@ function relatedTo(game, games, limit = 6) {
     .slice(0, limit);
 }
 
+// The page's cover is the full-size poster from the game page; the listing's small cover is its fallback.
+const posterOf = game =>
+  game.art.poster
+    ? {...game, art: {...game.art, cover: game.art.poster, coverFallbacks: [game.art.cover]}}
+    : game;
+
 function Backdrop({game}) {
   const [failed, setFailed] = useState([]);
   const uri = [game.art.hero, ...game.shots.map(shot => shot.url), game.art.cover].find(
@@ -121,7 +127,7 @@ function Hero({game, onBack, onViewWeb, onDetectDownload, captureState, captureE
               backgroundColor: '#17171a'
             }}
           >
-            <Cover game={game} style={COVER} />
+            <Cover game={posterOf(game)} style={COVER} />
           </View>
           <motion.View variants={column} initial="hidden" animate="show" style={{flex: 1}}>
             <motion.View variants={rise} style={{marginBottom: 24}}>

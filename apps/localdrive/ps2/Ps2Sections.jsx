@@ -15,7 +15,6 @@ import {Icon} from '../ui/Icon.jsx';
 import {Menu, MenuItem} from '../ui/Menu.jsx';
 import {SectionHeader} from '../ui/SectionHeader.jsx';
 import {SideSheet} from '../ui/SideSheet.jsx';
-import {loadPs2Details} from './source.js';
 import {
   POPULAR,
   PS2_GENRES,
@@ -87,7 +86,6 @@ function CardRail({title, games, prefix, onSeeAll}) {
             detailed
             focusKey={key}
             rowEnd={index === games.length - 1}
-            onFocus={() => loadPs2Details(game.id)}
             onPress={() => open(game, key)}
           />
         );
@@ -426,7 +424,6 @@ const Grid = memo(function Grid({games}) {
           detailed
           rowEnd={index % COLUMNS === COLUMNS - 1 || index === games.length - 1}
           focusKey={`ps2:${game.id}`}
-          onFocus={() => loadPs2Details(game.id)}
           onPress={() => open(game, `ps2:${game.id}`)}
         />
       )}
