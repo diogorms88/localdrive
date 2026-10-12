@@ -84,7 +84,7 @@ while loads are pending, then registers finished pixels with the engine.
 
 | Budget | Value |
 | --- | --- |
-| Decoded cache | 64 MiB and at most 256 images; the PS5 host keeps 64 MiB with a heap of 256 MiB or more, 40 MiB from 192 MiB and 24 MiB below. Images in use are never evicted, so a screen that draws more than that exceeds it; unused ones are evicted least recently used first |
+| Decoded cache | 64 MiB and at most 256 images, each holding one of the engine's 384 image slots (`ERUI_IMAGE_REGISTRY_MAX`), which leaves room for bundled assets; the PS5 host keeps 64 MiB with a heap of 256 MiB or more, 40 MiB from 192 MiB and 24 MiB below. Images in use are never evicted, so a screen that draws more than that exceeds it; unused ones are evicted least recently used first |
 | Encoded cache | 4 MiB of recently fetched bytes by URL, so the same image at another size decodes without a second fetch. Loads of a URL already being fetched join that request |
 | Decode | One image at a time; a decode holds about 4.5 bytes per source pixel for JPEG and 8 for PNG (up to 40 MiB at the source limit) until it finishes |
 | In flight | No new fetch starts while encoded bytes held anywhere (responses, decode queue, encoded cache) pass 16 MiB; up to 32 connections, 8 while a download to a file runs |

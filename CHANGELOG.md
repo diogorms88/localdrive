@@ -1,5 +1,12 @@
 # Changelog
 
+## LocalDrive v0.0.19
+
+- Fixed images that stayed blank after browsing for a while, such as a PS2 game's large screenshot and
+  backdrop: every cached image holds one of the engine's image slots, and the 256 slots matched the
+  loader's 256-image cache, so bundled art and images on screen left no room and new images were
+  dropped with "the engine image registry is full". The engine now has 384 slots.
+
 ## LocalDrive v0.0.18
 
 - The PS2 tab loads less at once, so a game page's cover, backdrop and screenshots are no longer stuck

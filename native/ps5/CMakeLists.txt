@@ -16,10 +16,13 @@ set(ERUI_SCRATCH_H 512 CACHE STRING "" FORCE)
 set(ERUI_MAX_ANIM_VALUES 1024 CACHE STRING "" FORCE)
 set(ERUI_MAX_VALUE_BINDINGS 8 CACHE STRING "" FORCE)
 # Photos are baked at half size and drawn up to 2560 px wide: bilinear, one full-width row in the
-# scaler and gradient pools (+7 KB each over 800 px), and 256 image slots (+11 KB at 88 B per slot).
+# scaler and gradient pools (+7 KB each over 800 px), and 384 image slots (+22 KB at 88 B per slot).
+# Every decoded URL image stays registered while the loader caches it (images::kCacheEntries, 256),
+# and bundled assets take slots too: with 256 slots a full cache left no room, and a new image failed
+# with "the engine image registry is full" and drew nothing.
 set(ERUI_BILINEAR_SCALE ON CACHE BOOL "" FORCE)
 set(ERUI_MAX_IMG_ROW_PIXELS 2560 CACHE STRING "" FORCE)
-set(ERUI_IMAGE_REGISTRY_MAX 256 CACHE STRING "" FORCE)
+set(ERUI_IMAGE_REGISTRY_MAX 384 CACHE STRING "" FORCE)
 # View backgroundGradient (linear and radial; also <Svg> gradient fills): about 5 KB of code, an 8 KB
 # colour ramp and a 10 KB row per render worker; nodes without a gradient pay nothing per frame.
 set(ERUI_GRADIENT ON CACHE BOOL "" FORCE)
