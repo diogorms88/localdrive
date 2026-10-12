@@ -1,0 +1,522 @@
+// Copyright (C) 2026 half144 and PS5 React contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Additional attribution term: see LICENSE-ATTRIBUTION.
+// Independent React proof: PS5 lifecycle/display/input, software UI and GL texture.
+
+#include "network.hpp"
+#include "archives.hpp"
+#include "packages.hpp"
+#include "removals.hpp"
+#include "browser_capture.hpp"
+#include "thread_name.hpp"
+#include "app_config.hpp"
+#include "async_log.hpp"
+#include "platform/ps5/display_egl.hpp"
+#include "platform/ps5/pad.hpp"
+#include "platform/ps5/system.hpp"
+#include "core/input.hpp"
+#include "damage_tracker.hpp"
+#include "frame_stats.hpp"
+#include "gl_presenter.hpp"
+#include "image_loader.hpp"
+#include "host_api.hpp"
+#include "host_platform.hpp"
+#include "actions.hpp"
+#include "input_script.hpp"
+#include "js_heap.hpp"
+#include "payload_loader.hpp"
+#include "screenshot.hpp"
+#include "text_shaper.hpp"
+#include "filesystem_access.hpp"
+#include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstdint>
+#include <iterator>
+#include <string>
+#include <utility>
+#include <pthread.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+extern "C" {
+#include "er_runtime.h"
+#include "er_scene.h"
+#include "native_renderer.h"
+#include "software_backend.h"
+void er_register_assets(void);
+std::uint64_t sceKernelReadTsc(void);
+std::uint64_t sceKernelGetTscFrequency(void);
+void hui_heap_capacity(std::size_t* size, std::size_t* flexible_before, std::size_t* flexible_after);
+void hui_heap_stats(std::size_t* live_bytes, std::size_t* peak_bytes, std::size_t* blocks, std::size_t* failures);
+extern const char proof_bundle[];
+extern const unsigned long proof_bundle_length;
+}
+
+// Extraction steps go to the console log, so the crash log keeps the last one before a fault.
+bool archives::list_directory(const char* path, void (*visit)(const char*, void*), void* user) { return host::read_dir(path, visit, user); }
+void archives::trace(const char* step, const char* detail) { async_log::write("[PS5-REACT] archive %s %s", step, detail); }
+// The extraction's write ring: larger on larger heaps, and none (inline writes, as before) unless the
+// heap still has room for the 64 MiB decoder budget the preflight admits, the ring, and a margin.
+std::size_t archives::pipeline_bytes() {
+  constexpr std::size_t MiB = 1024 * 1024;
+  std::size_t size = 0, live = 0, peak = 0, blocks = 0, failures = 0;
+  hui_heap_capacity(&size, nullptr, nullptr);
+  hui_heap_stats(&live, &peak, &blocks, &failures);
+  const std::size_t ring = size >= 256 * MiB ? 32 * MiB : size >= 192 * MiB ? 16 * MiB : 8 * MiB;
+  return live + 64 * MiB + ring + 16 * MiB <= size ? ring : 0;
+}
+// The image caches drop to their low budgets for an in-process extraction (the render thread trims
+// within a frame or two; images on screen stay), then the heap must still hold the decoder budget and
+// the margin. pipeline_bytes() sizes the ring from what is left after the trim.
+bool archives::hold_memory(bool hold) {
+  images::hold_memory(hold);
+  if (!hold) return true;
+  for (int i = 0; i < 25 && images::memory().decoded > images::kLowCacheBytes; ++i) usleep(10'000);
+  constexpr std::size_t MiB = 1024 * 1024;
+  std::size_t size = 0, live = 0, peak = 0, blocks = 0, failures = 0;
+  hui_heap_capacity(&size, nullptr, nullptr);
+  hui_heap_stats(&live, &peak, &blocks, &failures);
+  const bool room = !size || live + 64 * MiB + 16 * MiB <= size;
+  async_log::write("[PS5-REACT] extraction memory: heap=%zu/%zuMiB img decoded=%zuKiB room=%d", live >> 20, size >> 20,
+                   images::memory().decoded >> 10, room);
+  return room;
+}
+bool archives::downloading() { return network::downloading(); }
+// rar-extract.elf goes to the payload loader as the package installer does, and reports on the socket.
+int archives::start_rar_worker(const std::string& request, std::string& error) {
+  const int socket = payload_loader::send("rar-extract.elf", request, 5'000'000, "Archives.extract", error);
+  if (socket >= 0) payload_loader::receive_timeout(socket, 250'000);
+  return socket;
+}
+long archives::read_rar_worker(int stream, char* data, std::size_t size) {
+  const int count = payload_loader::receive(stream, data, size);
+  return count < 0 ? -1 : count;
+}
+void archives::cancel_rar_worker(int stream) { payload_loader::write(stream, "cancel\n", 7); }
+void archives::close_rar_worker(int stream) { payload_loader::close(stream); }
+
+namespace {
+// Startup steps log their time since main(), to show where launch time goes.
+std::int64_t launch_us = 0;
+long long since_launch_ms() { return (hui::sys::monotonic_us() - launch_us) / 1000; }
+
+void log_memory() {
+  std::size_t live = 0, peak = 0, blocks = 0, failures = 0, size = 0;
+  hui_heap_stats(&live, &peak, &blocks, &failures);
+  hui_heap_capacity(&size, nullptr, nullptr);
+  const images::Memory image = images::memory();
+  async_log::write("[PS5-REACT] memory: heap=%zu/%zuMiB peak=%zuMiB failed=%zu img encoded=%zuKiB decoded=%zuKiB",
+                   live >> 20, size >> 20, peak >> 20, failures, image.encoded >> 10, image.decoded >> 10);
+  async_log::write("[PS5-REACT] images: %s", images::stats().c_str());
+}
+
+// A frozen screen on a tester's console says where the render loop hangs: past three seconds without
+// a turn, the log names the loop's phase, the native call it is in and how far script got meanwhile
+// (QuickJS polls its interrupt handler while it runs, so rising js_ticks with no call is a script loop).
+std::atomic<std::int64_t> loop_beat{0};
+std::atomic<const char*> loop_phase{"start"};
+std::atomic<std::uint64_t> js_ticks{0};
+std::atomic<bool> watching{true};
+
+void beat(const char* phase) {
+  loop_phase.store(phase, std::memory_order_relaxed);
+  loop_beat.store(hui::sys::monotonic_us(), std::memory_order_relaxed);
+}
+
+void* watch_loop(void*) {
+  name_thread("stall-watch");
+  std::int64_t stalled_at = 0, next_report = 0;
+  std::uint64_t ticks = 0;
+  while (watching) {
+    usleep(500'000);
+    const std::int64_t now = hui::sys::monotonic_us(), last = loop_beat.load(std::memory_order_relaxed);
+    if (stalled_at && last != stalled_at) {
+      async_log::write("[PS5-REACT] stall: loop turned again after %lldms", static_cast<long long>((last-stalled_at)/1000));
+      stalled_at = 0;
+    }
+    if (now - last < 3'000'000) continue;
+    if (!stalled_at) { stalled_at = last; next_report = now; ticks = js_ticks; }
+    if (now < next_report) continue;
+    const char* call = host::current_call.load();
+    const std::uint64_t seen = js_ticks;
+    async_log::write("[PS5-REACT] stall: loop stuck %llds phase=%s call=%s js_ticks=+%llu",
+                     static_cast<long long>((now-last)/1000000), loop_phase.load(std::memory_order_relaxed),
+                     call ? call : "none", static_cast<unsigned long long>(seen-ticks));
+    ticks = seen; next_report = now + 5'000'000;
+  }
+  return nullptr;
+}
+
+// Unused decoded images kept for scrolling back. Browsing peaks near 110 MiB live with 24 MiB of them
+// and a 64-connection download, so a 128 MiB heap keeps 24 MiB; a 256 MiB heap holds 64 MiB (about 160
+// grid covers, or a hero and 140 covers) and still leaves over 80 MiB free at that peak.
+std::size_t image_cache_bytes() {
+  std::size_t heap = 0;
+  hui_heap_capacity(&heap, nullptr, nullptr);
+  constexpr std::size_t MiB = 1024 * 1024;
+  return heap >= 256 * MiB ? 64 * MiB : heap >= 192 * MiB ? 40 * MiB : 24 * MiB;
+}
+
+// A file in the app folder's dev/ directory. After console filesystem elevation /app0 is only a
+// logical path, so it is resolved like the native API's paths.
+std::string dev_path(const char* name) {
+  char path[PATH_MAX];
+  return host::resolve_path((std::string("/app0/dev/") + name).c_str(), path, sizeof path) ? path : "";
+}
+
+constexpr int width = PS5_REACT_WIDTH, height = PS5_REACT_HEIGHT;
+constexpr std::int64_t duration_us = static_cast<std::int64_t>(PS5_REACT_TIMEOUT) * 1000000;
+
+void react_log(const char* line) { async_log::write("[REACT] %s", line); }
+
+// An app folder may carry dev/input-script.txt (InputScript syntax) for unattended profiling; it is
+// never part of a build, only added to a test deploy.
+void load_input_script(InputScript& script) {
+  FILE* file = std::fopen(dev_path("input-script.txt").c_str(), "rb");
+  if (!file) return;
+  char text[4096] = {};
+  text[std::fread(text, 1, sizeof text - 1, file)] = '\0';
+  std::fclose(file);
+  char error[160];
+  if (script.parse(text, error, sizeof error)) async_log::write("[PS5-REACT] input script loaded");
+  else async_log::write("[PS5-REACT] input script ignored: %s", error);
+}
+
+// Live commands for a running title: a test machine overwrites dev/commands.txt with lines
+// "<sequence> <steps>" (InputScript syntax); about once a second the host runs the steps of every line
+// whose sequence number is new. Active only when the app folder has a dev directory, which a build never
+// creates. Lines present at launch are skipped.
+class LiveCommands {
+public:
+  void start() {
+    struct stat info;
+    enabled_ = stat(dev_path("").c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+    if (enabled_) read(false);
+  }
+
+  // Appends new commands to `script` once it has finished its previous steps.
+  void poll(std::int64_t now_us, InputScript& script) {
+    if (!enabled_ || now_us < next_poll_us_) return;
+    next_poll_us_ = now_us + 1000000;
+    read(true);
+    if (pending_.empty() || !script.done()) return;
+    char error[160];
+    if (!script.parse(pending_.c_str(), error, sizeof error)) async_log::write("[PS5-REACT] command ignored: %s", error);
+    pending_.clear();
+  }
+
+private:
+  void read(bool queue) {
+    FILE* file = std::fopen(dev_path("commands.txt").c_str(), "rb");
+    if (!file) return;
+    char text[4096] = {};
+    text[std::fread(text, 1, sizeof text - 1, file)] = '\0';
+    std::fclose(file);
+    for (char* line = std::strtok(text, "\n"); line; line = std::strtok(nullptr, "\n")) {
+      char* steps = nullptr;
+      const unsigned long long sequence = std::strtoull(line, &steps, 10);
+      if (steps == line || sequence <= last_sequence_) continue;
+      steps += std::strspn(steps, " \t");
+      last_sequence_ = sequence;
+      if (!queue) continue;
+      async_log::write("[PS5-REACT] command: %s", steps);
+      pending_ += steps;
+      pending_ += ' ';
+    }
+  }
+
+  bool enabled_ = false;
+  unsigned long long last_sequence_ = 0;
+  std::int64_t next_poll_us_ = 0;
+  std::string pending_;
+};
+
+// The engine reads this clock around every blit, thousands of times in a full-screen frame:
+// clock_gettime made the frame log cost about 10 ms there, the time-stamp counter costs nothing.
+std::uint64_t tsc_per_us = 1;
+std::uint32_t perf_clock() { return static_cast<std::uint32_t>(sceKernelReadTsc() / tsc_per_us); }
+
+// Indexed like kButtonNames.
+constexpr hui::Action kButtonActions[] = {
+  hui::Action::up, hui::Action::down, hui::Action::left, hui::Action::right,
+  hui::Action::confirm, hui::Action::back, hui::Action::north, hui::Action::west,
+  hui::Action::page_prev, hui::Action::page_next, hui::Action::jump_prev, hui::Action::jump_next,
+  hui::Action::l3, hui::Action::r3, hui::Action::menu, hui::Action::touch,
+};
+static_assert(std::size(kButtonActions) == std::size(kButtonNames));
+
+// Buttons delivered to the app as actions; the D-pad and left stick come through input.nav.
+constexpr std::pair<hui::Action, HostAction> kExtraActions[] = {
+  {hui::Action::confirm, HostAction::confirm}, {hui::Action::back, HostAction::back},
+  {hui::Action::page_prev, HostAction::l1}, {hui::Action::page_next, HostAction::r1},
+  {hui::Action::jump_prev, HostAction::l2}, {hui::Action::jump_next, HostAction::r2},
+  {hui::Action::north, HostAction::triangle}, {hui::Action::west, HostAction::square},
+  {hui::Action::menu, HostAction::options},
+};
+
+GamepadState gamepad_state(const hui::InputFrame& input) {
+  GamepadState state;
+  state.connected = input.connected;
+  state.left_x = input.stick_x; state.left_y = input.stick_y;
+  state.right_x = input.stick2_x; state.right_y = input.stick2_y;
+  state.l2 = input.trigger_l; state.r2 = input.trigger_r;
+  for (std::size_t i = 0; i < std::size(kButtonActions); ++i)
+    if (input.is_held(kButtonActions[i])) state.buttons |= 1u << i;
+  return state;
+}
+
+const char* nav_action(hui::Direction direction) {
+  switch (direction) {
+    case hui::Direction::up: return action_name(HostAction::up);
+    case hui::Direction::down: return action_name(HostAction::down);
+    case hui::Direction::left: return action_name(HostAction::left);
+    case hui::Direction::right: return action_name(HostAction::right);
+    default: return nullptr;
+  }
+}
+
+GcScheduler gc_scheduler(hui::sys::monotonic_us);
+
+bool dispatch(const char* action) {
+  gc_scheduler.input(hui::sys::monotonic_us());
+  er_perf_phase_begin(ER_PERF_PHASE_JS);
+  JSContext* ctx = er_runtime_context();
+  JSValue global = JS_GetGlobalObject(ctx);
+  JSValue fn = JS_GetPropertyStr(ctx, global, "__ps5ReactDispatch");
+  JSValue value = JS_NewString(ctx, action);
+  JSValue result = JS_Call(ctx, fn, global, 1, &value);
+  const bool ok = !JS_IsException(result);
+  if (!ok) {
+    JSValue error = JS_GetException(ctx);
+    const char* message = JS_ToCString(ctx, error);
+    async_log::write("[PS5-REACT] input exception: %s", message ? message : "unknown");
+    if (message) JS_FreeCString(ctx, message);
+    JS_FreeValue(ctx, error);
+  }
+  JS_FreeValue(ctx, result); JS_FreeValue(ctx, value);
+  JS_FreeValue(ctx, fn); JS_FreeValue(ctx, global);
+  er_perf_phase_end(ER_PERF_PHASE_JS);
+  return ok;
+}
+
+// Owned resources are released while the context is valid; closing the title
+// happens after this scope, through the platform's lifecycle API.
+bool run_proof() {
+  hui::ps5::Display display;
+  hui::ps5::Pad pad;
+  GlPresenter presenter;
+  hui::InputTracker tracker;
+  hui::PadSample samples[64];
+  FrameStats stats;
+  unsigned summaries = 0;
+  bool runtime = false, software = false;
+  bool ok = display.open(PS5_REACT_SURFACE_WIDTH, PS5_REACT_SURFACE_HEIGHT);
+  async_log::write("[PS5-REACT] display=%d at %lldms", ok, since_launch_ms());
+  if (ok) {
+    ok = presenter.init(width, height);
+    async_log::write("[PS5-REACT] presenter=%d", ok);
+  }
+  if (ok) {
+    software = er_software_backend_init(width, height);
+    ok = software && damage_tracker_install(width, height);
+    async_log::write("[PS5-REACT] software framebuffer=%d %dx%d", ok, width, height);
+  }
+  // The pad opens before the bundle runs: it also initializes the user service
+  // that the users, notification and browser calls need.
+  if (ok) {
+    async_log::write("[PS5-REACT] pad=%d at %lldms", pad.open(), since_launch_ms());
+    host_platform_set_pad(&pad);
+  }
+  if (ok) {
+    images::set_cache_bytes(image_cache_bytes());
+    images::set_heap_probe([] {
+      images::Heap heap;
+      std::size_t peak = 0, blocks = 0, failures = 0;
+      hui_heap_stats(&heap.live, &peak, &blocks, &failures);
+      hui_heap_capacity(&heap.size, nullptr, nullptr);
+      return heap;
+    });
+    if (network::start()) ps5_react_start_images();
+    async_log::write("[PS5-REACT] sound=%d at %lldms", ps5_react_start_sound(), since_launch_ms());
+    ErRuntimeConfig config = {};
+    config.screen_width = width; config.screen_height = height;
+    config.screen_scale = 2;
+    config.log = react_log;
+    config.max_stack_size = 1024 * 1024;
+    config.memory_limit = kJsMemoryLimit;
+    config.malloc_functions = js_heap_functions();
+    config.install_host_globals = ps5_react_install_host_api;
+    runtime = er_runtime_init(&config);
+    ok = runtime;
+    async_log::write("[PS5-REACT] runtime=%d at %lldms", ok, since_launch_ms());
+  }
+  if (ok) {
+    er_register_assets();
+    char fonts[256];
+    if (host::resolve_path("/app0/fonts", fonts, sizeof fonts))
+      text_shaper::install(fonts, [](const char* line) { async_log::write("[PS5-REACT] %s", line); });
+    ok = er_runtime_load_source(proof_bundle, proof_bundle_length, "app.jsx.bundle");
+    async_log::write("[PS5-REACT] bundle=%d gc_accounting=%d at %lldms", ok, er_runtime_gc_accounting_ok(), since_launch_ms());
+  }
+  if (ok) {
+    // Input failure is logged; timeout still allows the display-only proof to end.
+    async_log::write("[PS5-REACT] timeout=%ds after first frame", PS5_REACT_TIMEOUT);
+    std::int64_t first_present = 0, previous = hui::sys::monotonic_us();
+    std::uint64_t frames = 0;
+    InputScript script;
+    load_input_script(script);
+    LiveCommands commands;
+    commands.start();
+    beat("start");
+    JS_SetInterruptHandler(JS_GetRuntime(er_runtime_context()),
+                           [](JSRuntime*, void*) { js_ticks.fetch_add(1, std::memory_order_relaxed); return 0; }, nullptr);
+    pthread_t watcher;
+    const bool watcher_started = pthread_create(&watcher, nullptr, watch_loop, nullptr) == 0;
+    // A test deploy may lower the slow-frame threshold (milliseconds) with dev/slow-frame-ms.txt.
+    std::uint32_t slow_frame_us = 33000;
+    if (FILE* file = std::fopen(dev_path("slow-frame-ms.txt").c_str(), "rb")) {
+      char text[16] = {};
+      if (std::fgets(text, sizeof text, file) && std::atoi(text) > 0) slow_frame_us = std::atoi(text) * 1000u;
+      std::fclose(file);
+    }
+    tsc_per_us = std::max<std::uint64_t>(sceKernelGetTscFrequency() / 1000000, 1);
+    er_perf_set_clock(perf_clock);
+    while (ok) {
+      const std::int64_t now = hui::sys::monotonic_us();
+      beat("input");
+      if (now <= 0 || (duration_us > 0 && first_present && now - first_present >= duration_us)) break;
+      if (const char* line = stats.start_frame(now)) {
+        async_log::write("[PS5-REACT] %s", line);
+        // Every fifth summary, about ten seconds apart.
+        if (++summaries % 5 == 1) log_memory();
+      }
+      const auto count = pad.read(samples);
+      const auto input = tracker.update(std::span<const hui::PadSample>(samples, count), now);
+      pad.tick(static_cast<float>(now - previous) / 1000000.0f);
+      host_platform_tick(now);
+      ps5_react_set_gamepad(gamepad_state(input));
+      if (const char* direction = nav_action(input.nav)) ok = dispatch(direction);
+      for (const auto& [button, action] : kExtraActions) {
+        if (ok && input.is_pressed(button)) ok = dispatch(action_name(action));
+      }
+      commands.poll(now, script);
+      if (const char* action = ok ? script.next(static_cast<std::uint64_t>(now / 1000)) : nullptr) {
+        async_log::write("[PS5-REACT] script: %s", action);
+        if (!std::strcmp(action, "quit")) break;
+        if (!std::strncmp(action, "shot:", 5)) {
+          const std::string path = dev_path((std::string(action + 5) + ".bmp").c_str());
+          async_log::write("[PS5-REACT] shot %s: %s", path.c_str(), save_screenshot(path.c_str()) ? "saved" : std::strerror(errno));
+        } else {
+          ok = dispatch(action);
+        }
+      }
+      if (!ok) break;
+      stats.lap(FrameStats::input, hui::sys::monotonic_us());
+      er_perf_phase_begin(ER_PERF_PHASE_JS);
+      beat("js");
+      er_runtime_pump();
+      // The display shows a new frame every vblank, so motion advances by whole vblanks, not by the
+      // loop's jittery wall-clock interval.
+      const std::int64_t vblanks = std::max<std::int64_t>(1, (now - previous + 8333) / 16667);
+      ok = ps5_react_frame(er_runtime_context(), vblanks * 1000.0 / 60.0);
+      er_perf_phase_end(ER_PERF_PHASE_JS);
+      if (!ok) {
+        async_log::write("[PS5-REACT] frame callback exception");
+        break;
+      }
+      beat("commit");
+      er_commit();
+      if (*er_runtime_last_error()) { ok = false; break; }
+      stats.lap(FrameStats::update, hui::sys::monotonic_us());
+      er_perf_phase_begin(ER_PERF_PHASE_PRESENT);
+      beat("present");
+      ok = presenter.draw(er_software_framebuffer(), damage_tracker_rects(), damage_tracker_moves(), display.width(),
+                          display.height());
+      er_perf_phase_end(ER_PERF_PHASE_PRESENT);
+      damage_tracker_clear();
+      stats.lap(FrameStats::present, hui::sys::monotonic_us());
+      beat("swap");
+      ok = ok && display.swap();
+      stats.lap(FrameStats::swap, hui::sys::monotonic_us());
+      if (!ok) break;
+      beat("gc");
+      if (const char* line = gc_scheduler.frame(JS_GetRuntime(er_runtime_context()), hui::sys::monotonic_us()))
+        async_log::write("[PS5-REACT] %s", line);
+      if (!first_present) {
+        first_present = hui::sys::monotonic_us();
+        hui::sys::hide_splash_screen();
+        async_log::write("[PS5-REACT] first frame presented at %lldms", since_launch_ms());
+      }
+      beat("embedded");
+      embedded_renderer_tick(static_cast<std::uint32_t>(std::clamp<std::int64_t>((now-previous)/1000, 0, 50)));
+      previous = now;
+      ++frames;
+      if (const char* line = stats.end_frame(slow_frame_us)) async_log::write("[PS5-REACT] %s", line);
+      if (ps5_react_exit_requested()) break;
+    }
+    async_log::write("[PS5-REACT] loop ended ok=%d frames=%llu", ok, static_cast<unsigned long long>(frames));
+    watching = false;
+    if (watcher_started) pthread_join(watcher, nullptr);
+  }
+  if (!ok && runtime) async_log::write("[PS5-REACT] error=%s", er_runtime_last_error());
+  ps5_react_stop_images();
+  archives::stop();
+  browser_capture::stop();
+  packages::stop();
+  removals::stop();
+  network::stop();
+  if (runtime) er_runtime_shutdown();
+  text_shaper::shutdown();
+  ps5_react_stop_sound();
+  if (software) er_software_backend_destroy();
+  host_platform_set_pad(nullptr);
+  pad.close();
+  presenter.release();
+  display.close();
+  return ok;
+}
+
+void* render_thread(void*) {
+  name_thread("render");
+  hui::sys::log("[PS5-REACT] render thread started, 8 MiB stack, at %lldms", since_launch_ms());
+  if (!async_log::start()) hui::sys::log("[PS5-REACT] log writer thread failed; logging synchronously");
+  const bool ok = run_proof();
+  async_log::stop();
+  hui::sys::log("[PS5-REACT] cleanup complete, result=%d; requesting title closure", ok);
+  hui::sys::quit();
+  return nullptr;
+}
+} // namespace
+
+int main() {
+  hui::sys::log("[PS5-REACT] %s (%s)", PS5_REACT_NAME, PS5_REACT_TITLE);
+  std::size_t heap = 0, flexible_before = 0, flexible_after = 0;
+  hui_heap_capacity(&heap, &flexible_before, &flexible_after);
+  if (heap)
+    hui::sys::log("[PS5-REACT] heap: %zu MiB (flexible memory free %zu MiB before it, %zu MiB after)",
+                  heap >> 20, flexible_before >> 20, flexible_after >> 20);
+  else
+    hui::sys::log("[PS5-REACT] heap: none, system malloc (flexible memory free %zu MiB)", flexible_before >> 20);
+  launch_us = hui::sys::monotonic_us();
+  initialize_filesystem_access();
+  pthread_attr_t attributes;
+  int result = pthread_attr_init(&attributes);
+  if (!result) {
+    result = pthread_attr_setstacksize(&attributes, 8 * 1024 * 1024);
+    pthread_t thread;
+    if (!result) result = pthread_create(&thread, &attributes, render_thread, nullptr);
+    pthread_attr_destroy(&attributes);
+  }
+  if (result) {
+    hui::sys::log("[PS5-REACT] thread creation failed=%d", result);
+    hui::sys::quit();
+  }
+  // Native titles must not return to CRT exit(); the render thread owns closure.
+  hui::sys::park();
+  return 0;
+}
