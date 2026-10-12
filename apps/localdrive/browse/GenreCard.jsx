@@ -37,11 +37,11 @@ function Fan({covers}) {
   ));
 }
 
-export const GenreCard = memo(function GenreCard({genre, count, covers, active: active, onToggle}) {
+export const GenreCard = memo(function GenreCard({genre, count, covers, active: active, onToggle, focusKey}) {
   const t = useT();
   return (
     <motion.View
-      focusKey={`genre:${genre}`}
+      focusKey={focusKey ?? `genre:${genre}`}
       onPress={() => onToggle(genre)}
       selected={active}
       whileFocus={{y: -6}}

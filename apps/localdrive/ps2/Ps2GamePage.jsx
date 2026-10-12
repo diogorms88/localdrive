@@ -19,6 +19,7 @@ import {About} from '../game/About.jsx';
 import {ShotViewer} from '../game/ShotViewer.jsx';
 import {downloadQueue, storageRoots} from '../state/downloads.js';
 import {webURL} from '../state/download-sources.js';
+import {recordPs2Visit} from './library.js';
 import {loadPs2Details, usePs2Catalog} from './source.js';
 import '../assets/Inter-Regular.ttf';
 
@@ -65,7 +66,7 @@ function Hero({game, onBack, onViewWeb, onDetectDownload, captureState, captureE
   const wished = useWishlist().includes(game.id);
   const developer = fitBytes(game.developer, SPAN_MAX - 3);
   const genres = fitBytes(game.genres.map(genreLabel).join(', '), SPAN_MAX);
-  const nextDown = game.shots.length > 0 ? 'game:shots' : 'ps2:view-web';
+  const nextDown = game.shots.length > 0 ? 'game:shots' : `ps2:download:${game.id}`;
   return (
     <View
       scrollAnchor
@@ -150,27 +151,17 @@ function Hero({game, onBack, onViewWeb, onDetectDownload, captureState, captureE
               </motion.View>
             ) : null}
             <View style={{marginTop: 42, flexDirection: 'row', alignItems: 'flex-start', gap: 15}}>
-              {Platform.OS === 'ps5' ? (
-                <Button
-                  variant="primary"
-                  size="lg"
-                  label={captureState === 'capturing' ? t('ps2.captureWaiting') : t('ps2.captureDownload')}
-                  icon={captureState === 'capturing' ? 'external' : 'download'}
-                  autoFocus
-                  focusKey={`ps2:capture:${game.id}`}
-                  nextFocusDown={nextDown}
-                  onPress={onDetectDownload}
-                />
-              ) : null}
+              {/* One Download action: on PS5 it opens the game page and captures the archive link; the
+                  desktop preview has no capture, so it opens the page in the browser. */}
               <Button
-                variant="outline"
+                variant="primary"
                 size="lg"
-                label={t('ps2.viewOnWeb')}
-                icon="external"
-                autoFocus={Platform.OS !== 'ps5'}
-                focusKey={`ps2:view-web:${game.id}`}
+                label={captureState === 'capturing' ? t('ps2.captureWaiting') : t('ps2.download')}
+                icon={captureState === 'capturing' ? 'external' : 'download'}
+                autoFocus
+                focusKey={`ps2:download:${game.id}`}
                 nextFocusDown={nextDown}
-                onPress={onViewWeb}
+                onPress={Platform.OS === 'ps5' ? onDetectDownload : onViewWeb}
               />
               <Button
                 variant="outline"
@@ -297,6 +288,7 @@ export function Ps2GamePage({id}) {
   const game = games.find(item => item.id === id);
   useEffect(() => {
     loadPs2Details(id);
+    recordPs2Visit(id);
   }, [id]);
   useEffect(() => () => captureTask.current?.cancel(), [id]);
   if (!game) return null;

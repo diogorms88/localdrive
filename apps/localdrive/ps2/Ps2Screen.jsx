@@ -1,14 +1,18 @@
 import {useState, useEffect} from 'react';
-import {View, Text, Image, ScrollView, VirtualList, FocusScope, AnimatePresence, motion} from '@ps5-react/core';
+import {View, Text, Image, ScrollView, FocusScope, AnimatePresence, motion} from '@ps5-react/core';
 import {useT, useLocale} from '../i18n/index.js';
 import {genreLabel, summaryOf} from '../state/catalog.js';
 import {useNavState, useNavActions} from '../state/nav.jsx';
 import {Button} from '../ui/Button.jsx';
-import {GameCard} from '../ui/GameCard.jsx';
+import {useFavoriteAction} from '../ui/GameCard.jsx';
+import {WishHeart} from '../ui/WishHeart.jsx';
+import {useStoreActions, useWishlist} from '../state/store.jsx';
+import {Ps2PopularRail, Ps2RecentRail, Ps2Charts, Ps2GenreRail, Ps2Library, Ps2FilterSheet} from './Ps2Sections.jsx';
 import {EASE_OUT} from '../ui/ease.js';
 import {SpotlightList} from '../browse/SpotlightList.jsx';
 import {useSlides} from '../browse/useSlides.js';
 import {loadPs2Details, usePs2Catalog} from './source.js';
+import {ps2Browse} from './library.js';
 import '../assets/Inter-Regular.ttf';
 
 // The PS2 section uses a virtualized grid so the complete catalog can be browsed smoothly.
@@ -117,6 +121,8 @@ function Spotlight({games}) {
   const slides = useSlides(games.length, shown);
   const open = useOpenGame();
   const game = games[slides.active];
+  const {toggleWish} = useStoreActions();
+  const wished = useWishlist().includes(game?.id);
   if (!game) return null;
   const side = rtl ? {right: 0} : {left: 0};
   return (
@@ -182,11 +188,13 @@ function Spotlight({games}) {
             <Button
               variant="outline"
               size="lg"
-              label={t('browse.addToFavorites')}
+              label={t(wished ? 'game.favorite' : 'browse.addToFavorites')}
               focusKey={`${PREFIX}:wish`}
               nextFocusUp="nav:current"
-              onPress={() => {}}
-            />
+              onPress={() => toggleWish(game.id)}
+            >
+              <WishHeart active={wished} />
+            </Button>
           </View>
         </View>
       </View>
@@ -196,11 +204,12 @@ function Spotlight({games}) {
 }
 
 // Five games drawn from the whole catalog each time the PS2 tab is opened (see `reshufflePs2Featured`),
-// kept while the player visits a game page and comes back.
+// kept while the player visits a game page and comes back. The library's filters and sort reset too.
 let featuredIds = null;
 
 export function reshufflePs2Featured() {
   featuredIds = null;
+  ps2Browse.reset();
 }
 
 function pickFeatured(games) {
@@ -213,48 +222,31 @@ function pickFeatured(games) {
 }
 
 export function Ps2Screen() {
-  const t = useT();
   const games = usePs2Catalog();
-  const open = useOpenGame();
   featuredIds ??= pickFeatured(games);
   const featured = featuredIds.map(id => games.find(game => game.id === id)).filter(Boolean);
   const catalogKey = games.map(game => game.id).join('|');
   useEffect(() => {
     for (const game of featured) loadPs2Details(game.id);
   }, [catalogKey]);
+  const [filtering, setFiltering] = useState(false);
+  const onAction = useFavoriteAction();
   return (
-    <FocusScope trap>
-      <ScrollView style={{flex: 1, gap: 84, paddingHorizontal: 48}}>
-        <View scrollAnchor style={{gap: 24, paddingTop: 36}}>
-          <Spotlight games={featured} />
-        </View>
-        <View scrollAnchor style={{gap: 24}}>
-          <Text style={{fontFamily: 'Inter-Regular', fontSize: 30, fontWeight: 600, color: '#f2f2f3', lineHeight: 42}}>
-            {t('ps2.allGames')} · {games.length.toLocaleString()}
-          </Text>
-          <VirtualList
-            data={games}
-            numColumns={6}
-            itemHeight={339}
-            rowGap={40}
-            columnGap={24}
-            initialNumRows={3}
-            keyExtractor={game => game.id}
-            renderItem={({item: game, index}) => (
-              <GameCard
-                game={game}
-                width={182}
-                detailed
-                rowEnd={index % 6 === 5 || index === games.length - 1}
-                focusKey={`ps2:${game.id}`}
-                onFocus={() => loadPs2Details(game.id)}
-                onPress={() => open(game, `ps2:${game.id}`)}
-              />
-            )}
-          />
-        </View>
-        <View style={{height: 48}} />
-      </ScrollView>
-    </FocusScope>
+    <>
+      <FocusScope trap onAction={onAction}>
+        <ScrollView style={{flex: 1, gap: 84, paddingHorizontal: 48}}>
+          <View scrollAnchor style={{gap: 24, paddingTop: 36}}>
+            <Spotlight games={featured} />
+          </View>
+          <Ps2PopularRail games={games} />
+          <Ps2RecentRail games={games} />
+          <Ps2Charts games={games} />
+          <Ps2GenreRail games={games} />
+          <Ps2Library games={games} onOpenFilters={() => setFiltering(true)} />
+          <View style={{height: 48}} />
+        </ScrollView>
+      </FocusScope>
+      {filtering ? <Ps2FilterSheet games={games} onClose={() => setFiltering(false)} /> : null}
+    </>
   );
 }

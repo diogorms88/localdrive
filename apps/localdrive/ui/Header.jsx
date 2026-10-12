@@ -1,7 +1,7 @@
 import {useRef, useState} from 'react';
 import {FocusScope, View, Text} from '@ps5-react/core';
 import {useT, useLocale, focusEnd} from '../i18n/index.js';
-import {getGame, activeCount, genres, NO_FILTERS, genreLabel} from '../state/catalog.js';
+import {getGame, isPs2Game, activeCount, genres, NO_FILTERS, genreLabel} from '../state/catalog.js';
 import {useWishlist} from '../state/store.jsx';
 import {VERSION} from '../version.js';
 import {FocusRing} from './FocusRing.jsx';
@@ -24,7 +24,7 @@ export function Header({children}) {
   const {rtl} = useLocale();
   const {section, filters, sort, on, step, keyOf} = useSections();
   const wishlist = useWishlist();
-  const favorites = wishlist.filter(id => getGame(id)).length;
+  const favorites = wishlist.filter(id => getGame(id) || isPs2Game(id)).length;
   const nav = useNavActions();
   const {top} = useNavState();
   const [browsing, setBrowsing] = useState(false);

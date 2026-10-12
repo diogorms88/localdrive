@@ -14,7 +14,10 @@ The listing snapshot is bundled, so the full catalog appears without making 112 
 console. Adding newer site listings requires regenerating `catalog.js`; game detail metadata remains
 loaded on demand.
 
-On PS5, **Open and detect download** arms the native browser capture before opening the selected
+On PS5, **Download** arms the native browser capture before opening the selected
 game page. It forwards a visible HTTPS URL ending in `.zip`, `.rar` or `.7z` to the regular queue;
 the queue extracts it to `/data/PCSX2/games`. This capture is not available in the desktop preview,
 does not observe click events, and cannot identify providers that hide the archive extension.
+
+The tab's sections live in `Ps2Sections.jsx`; `library.js` holds the hand-picked popular list (CDRomance
+has no popularity data), the genre/region/edition filters, sorting and the recently viewed list.

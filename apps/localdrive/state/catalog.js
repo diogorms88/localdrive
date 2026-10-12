@@ -3,6 +3,7 @@ import {t, formatDate, formatNumber} from '../i18n/core.js';
 import {createPageCache} from './page-cache.js';
 import {createReleaseCache} from './release-cache.js';
 import {games, twins, features} from '../data/catalog.js';
+import {PS2_GAMES} from '../ps2/catalog.js';
 
 const COVER_WIDTH = 440;
 
@@ -272,9 +273,33 @@ const passes = (game, facet, picked) =>
   !picked.length ||
   (facet.any ? picked.some(value => facet.has(game, value)) : picked.every(value => facet.has(game, value)));
 
+// Favorites also lists wished PS2 games, with the fields the PS4/PS5 facets and sorts read.
+const ps2ById = new Map(PS2_GAMES.map(game => [game.id, game]));
+
+const ps2Favorites = new Map();
+
+export const isPs2Game = id => ps2ById.has(id);
+
+function ps2Favorite(id) {
+  const game = ps2ById.get(id);
+  if (!game) return null;
+  if (!ps2Favorites.has(id))
+    ps2Favorites.set(id, {
+      ...game,
+      platforms: ['ps2'],
+      features: [],
+      providers: [],
+      recommendations: 0,
+      metacritic: null,
+      sizeGb: null
+    });
+  return ps2Favorites.get(id);
+}
+
 function matching({filters, query, wishlist}, skip) {
   const q = query.trim().toLowerCase();
-  return games.filter(
+  const pool = filters.wishlist ? [...games, ...wishlist.map(ps2Favorite).filter(Boolean)] : games;
+  return pool.filter(
     game =>
       (!q || `${game.title} ${game.developer} ${game.publisher}`.toLowerCase().includes(q)) &&
       FACETS.every(facet => facet === skip || passes(game, facet, filters[facet.key])) &&

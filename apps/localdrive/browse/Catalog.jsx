@@ -59,7 +59,7 @@ const sameGrid = (a, b) =>
   a.games.every((game, i) => game === b.games[i]);
 
 const Grid = memo(function Grid({games: games, enter: enter}) {
-  const {openGame} = useNavActions();
+  const {openGame, push} = useNavActions();
   const [limit, setLimit] = useState(BATCH);
   const [filled, setFilled] = useState(STEP);
   const entering = useRef(enter);
@@ -82,10 +82,15 @@ const Grid = memo(function Grid({games: games, enter: enter}) {
         rowEnd={index % COLUMNS === COLUMNS - 1}
         enterDelay={entering.current ? index * STAGGER : void 0}
         onFocus={() => prefetchBelow(all.current, index)}
-        onPress={() => openGame(game.id, `card:${game.id}`)}
+        onPress={() =>
+          // Favorites can hold PS2 games, which have their own page.
+          game.platform === 'ps2'
+            ? push({name: 'ps2game', id: game.id}, `card:${game.id}`)
+            : openGame(game.id, `card:${game.id}`)
+        }
       />
     ),
-    [openGame]
+    [openGame, push]
   );
   return (
     <VirtualList

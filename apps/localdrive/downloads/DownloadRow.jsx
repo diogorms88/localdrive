@@ -1,5 +1,5 @@
 import {memo, useEffect, useState} from 'react';
-import {View, Text} from '@ps5-react/core';
+import {View, Text, Image} from '@ps5-react/core';
 import {useLocale, focusEnd, useT} from '../i18n/index.js';
 import {STALE_PARTIAL, cause, explainError} from './errors.js';
 import {BUSY, COMPLETE} from '../state/download-queue.js';
@@ -119,7 +119,11 @@ function DownloadRowView({job: job, game, autoFocus, run, onOpenGame, onFocusRow
           paddingVertical: 24
         }}
       >
-        <Cover game={game} label={false} style={THUMB} />
+        {game.art.asset ? (
+          <Image source={game.art.asset} resizeMode="cover" style={THUMB} />
+        ) : (
+          <Cover game={game} label={false} style={THUMB} />
+        )}
         <View style={{flex: 1, gap: 15}}>
           <View
             style={{

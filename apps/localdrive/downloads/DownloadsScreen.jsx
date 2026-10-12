@@ -4,6 +4,8 @@ import {fitBytes, SPAN_MAX} from '../i18n/fit.js';
 import {t, formatNumber} from '../i18n/core.js';
 import {useT} from '../i18n/index.js';
 import {getGame} from '../state/catalog.js';
+import {HOMEBREW} from '../homebrew/catalog.js';
+import {PS2_GAMES} from '../ps2/catalog.js';
 import {BUSY, COMPLETE} from '../state/download-queue.js';
 import {downloadQueue} from '../state/downloads.js';
 import {colors} from '../ui/colors.js';
@@ -27,6 +29,20 @@ const LIST_HINTS = [
 const EMPTY_HINTS = [HINT.select, HINT.back];
 
 const EMPTY_KEY = 'downloads:empty';
+
+
+const ps2ById = new Map(PS2_GAMES.map(game => [game.id, game]));
+
+// PS2 and HomeBrew downloads are not in the PS4/PS5 catalog: take their cover from their own lists.
+// HomeBrew and BIOS jobs are `local-<homebrew id>` or `local-<homebrew id>-bios-<region>`.
+function rowGame(job) {
+  const game = getGame(job.gameId) ?? ps2ById.get(job.gameId);
+  if (game) return game;
+  const item = HOMEBREW.find(
+    entry => job.gameId === `local-${entry.id}` || job.gameId?.startsWith(`local-${entry.id}-bios-`)
+  );
+  return {title: job.title, art: item ? {asset: item.cover} : {}};
+}
 
 function summary(jobs) {
   const count = states => jobs.filter(job => states.includes(job.state)).length;
@@ -60,7 +76,7 @@ function Section({title, jobs, first, handlers}) {
         <DownloadRow
           key={job.id}
           job={job}
-          game={getGame(job.gameId) ?? {title: job.title, art: {}}}
+          game={rowGame(job)}
           autoFocus={job === first}
           run={handlers.run}
           onOpenGame={handlers.openGame}

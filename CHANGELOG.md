@@ -1,5 +1,18 @@
 # Changelog
 
+## LocalDrive v0.0.16
+
+- The PS2 tab now follows Discover's layout: “Popular now”, “Recently viewed”, three top charts (most
+  popular, recently added, patches & translations), “Popular genres” and a “Browse library” grid with
+  filters (region, edition, genre; Triangle opens them) and sorting (most popular, recently added, A–Z,
+  Z–A). CDRomance publishes no popularity data, so “popular” is a hand-picked list of well-known PS2
+  titles. The Discover tab for PS4/PS5 is unchanged.
+- PS2 games added to favorites now appear in the Favorites tab and its count, and open their PS2 page.
+  The PS2 spotlight's “Add to favorites” button and Square on PS2 cards now work.
+- The PS2 game page has a single “Download” button in place of “View game on the web” and “Open and
+  detect download”.
+- The Downloads tab shows covers for PS2 games and for HomeBrew payloads and BIOS files.
+
 ## LocalDrive v0.0.15
 
 - Stepping onto Browse or Platform with L1/R1 now moves the header's grey highlight to that tab, as on
