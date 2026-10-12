@@ -1,5 +1,13 @@
 # Changelog
 
+## LocalDrive v0.0.6
+
+- Renamed the “Add game” tab to “HomeBrew” and removed its icon.
+- The HomeBrew screen lists homebrew with its cover, starting with the PS5SX2 PlayStation 2 emulator:
+  pressing a card downloads its `.elf` under its own name to the downloads folder, for the console's
+  ELF loader, and a file already downloaded is reported with its path. Adding a file by link remains
+  on the same screen.
+
 ## LocalDrive v0.0.5
 
 - Added “File size” as the last entry of the Browse menu: it lists the library from the smallest

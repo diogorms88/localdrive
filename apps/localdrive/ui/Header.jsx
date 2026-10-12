@@ -187,7 +187,6 @@ export function Header({children}) {
                 />
                 <NavItem
                   focusKey={keyOf('add')}
-                  icon="download"
                   label={t('nav.addGame')}
                   current={section === 'add'}
                   onPress={on.add}
