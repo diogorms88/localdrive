@@ -1,5 +1,9 @@
 # Changelog
 
+## LocalDrive v0.0.17
+
+- The launch animation shows the new LocalDrive icon and name in place of the old dial logo.
+
 ## LocalDrive v0.0.16
 
 - The PS2 tab now follows Discover's layout: “Popular now”, “Recently viewed”, three top charts (most
