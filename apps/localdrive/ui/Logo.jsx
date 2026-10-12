@@ -11,7 +11,7 @@ export function Logo({color = colors.fg}) {
       <Text
         style={[{fontFamily: 'Inter-Regular', fontSize: 29, fontWeight: 600, letterSpacing: -0.85}, {color}]}
       >
-        Localdrive
+        LocalDrive
       </Text>
     </View>
   );

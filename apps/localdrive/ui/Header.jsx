@@ -81,7 +81,8 @@ export function Header({children}) {
               paddingHorizontal: 48
             }}
           >
-            <NavPill section={section} layouts={layouts} />
+            {/* An open Browse or Platform menu (also reached with L1/R1) takes the pill like a section. */}
+            <NavPill section={browsing ? 'catalog' : choosingPlatform ? 'platform' : section} layouts={layouts} />
             <View
               style={{
                 flex: 1,
@@ -117,7 +118,7 @@ export function Header({children}) {
                     focusKey={keyOf('catalog')}
                     label={t('nav.browse')}
                     trailing={browsing ? 'chevronUp' : 'chevronDown'}
-                    current={section === 'catalog'}
+                    current={section === 'catalog' || browsing}
                     onPress={() => setBrowsing(open => !open)}
                     onLayout={track('catalog')}
                     nextFocusDown={down}
@@ -151,7 +152,7 @@ export function Header({children}) {
                     focusKey={keyOf('platform')}
                     label={t('nav.platform')}
                     trailing={choosingPlatform ? 'chevronUp' : 'chevronDown'}
-                    current={section === 'platform'}
+                    current={section === 'platform' || choosingPlatform}
                     onPress={() => setChoosingPlatform(open => !open)}
                     onLayout={track('platform')}
                     nextFocusDown={down}

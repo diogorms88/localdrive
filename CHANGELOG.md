@@ -1,5 +1,13 @@
 # Changelog
 
+## LocalDrive v0.0.15
+
+- Stepping onto Browse or Platform with L1/R1 now moves the header's grey highlight to that tab, as on
+  the other tabs.
+- The header name reads “LocalDrive”.
+- The PS2 tab's five spotlight games are drawn at random from the whole catalog each time the tab is
+  opened; they stay the same when returning from a game page.
+
 ## LocalDrive v0.0.14 — Full CDRomance PS2 catalog
 
 - Bundled all 3,341 game listings across CDRomance PS2 pages 1–112 into the PS2 tab and added them to

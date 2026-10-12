@@ -195,11 +195,29 @@ function Spotlight({games}) {
   );
 }
 
+// Five games drawn from the whole catalog each time the PS2 tab is opened (see `reshufflePs2Featured`),
+// kept while the player visits a game page and comes back.
+let featuredIds = null;
+
+export function reshufflePs2Featured() {
+  featuredIds = null;
+}
+
+function pickFeatured(games) {
+  const pool = [...games];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, 5).map(game => game.id);
+}
+
 export function Ps2Screen() {
   const t = useT();
   const games = usePs2Catalog();
   const open = useOpenGame();
-  const featured = [...games].sort((a, b) => Boolean(b.art.hero) - Boolean(a.art.hero)).slice(0, 5);
+  featuredIds ??= pickFeatured(games);
+  const featured = featuredIds.map(id => games.find(game => game.id === id)).filter(Boolean);
   const catalogKey = games.map(game => game.id).join('|');
   useEffect(() => {
     for (const game of featured) loadPs2Details(game.id);

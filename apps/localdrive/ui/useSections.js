@@ -2,6 +2,7 @@ import {useRef, useState} from 'react';
 import {activeCount, NO_FILTERS} from '../state/catalog.js';
 import {useStoreActions, useStoreState, useQueryActive} from '../state/store.jsx';
 import {useNavActions, useNavState} from '../state/nav.jsx';
+import {reshufflePs2Featured} from '../ps2/Ps2Screen.jsx';
 
 const KEYS = {
   search: 'nav:search',
@@ -82,7 +83,11 @@ export function useSections() {
     new: () => show(NO_FILTERS, 'newest'),
     add: () => topName.current !== 'add' && nav.push({name: 'add'}, 'nav:addGame'),
     platform: id => show({...NO_FILTERS, platform: [id]}, 'relevance'),
-    ps2: () => topName.current !== 'ps2' && nav.push({name: 'ps2'}, 'nav:platform'),
+    ps2: () => {
+      if (topName.current === 'ps2') return;
+      reshufflePs2Featured();
+      nav.push({name: 'ps2'}, 'nav:platform');
+    },
     favorites: () => show({...NO_FILTERS, wishlist: true}, 'relevance'),
     downloads: () => topName.current !== 'downloads' && nav.push({name: 'downloads'}, 'nav:downloads'),
     files: () => topName.current !== 'files' && nav.push({name: 'files'}, 'nav:files')
