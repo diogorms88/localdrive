@@ -1,5 +1,11 @@
 # Changelog
 
+## LocalDrive v0.0.5
+
+- Added “File size” as the last entry of the Browse menu: it lists the library from the smallest
+  download to the largest, with games of unknown size last. The library's Sort menu offers the same
+  order as “Smallest first”.
+
 ## LocalDrive v0.0.4
 
 - Localized the “Add game” navigation label as “Adicionar Jogos” in Brazilian Portuguese.

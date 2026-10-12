@@ -338,6 +338,7 @@
   "sort.rating": "Top",
   "sort.relevance": "Mais popular",
   "sort.size": "Maiores instala",
+  "sort.smallest": "Menores primeiro",
   "sort.title": "A–Z",
   "sources.browserNote": "Cada parte abre a página de um host, depois você digita seu link de arquivo com o controle.",
   "sources.cdnFastest": "Mais rápido",
@@ -400,5 +401,6 @@
   "capture.preparing": "Preparando a verificação do arquivo…",
   "capture.capturing": "Passe a verificação e aperte Download",
   "capture.validating": "Conferindo o arquivo capturado…",
-  "capture.detail": "Volte aqui após apertar Download. O download começa automaticamente quando o arquivo é validado. A captura dura até 3 minutos."
+  "capture.detail": "Volte aqui após apertar Download. O download começa automaticamente quando o arquivo é validado. A captura dura até 3 minutos.",
+  "nav.fileSize": "Tamanho de arquivo"
 }

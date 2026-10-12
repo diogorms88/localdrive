@@ -118,6 +118,8 @@ export const SORTS = [
   {id: 'newest', compare: (a, b) => b.releaseDate.localeCompare(a.releaseDate)},
   {id: 'rating', compare: (a, b) => (b.metacritic ?? 0) - (a.metacritic ?? 0)},
   {id: 'size', compare: (a, b) => (b.sizeGb ?? 0) - (a.sizeGb ?? 0)},
+  // Games without a known size go last, so the smallest real downloads lead.
+  {id: 'smallest', compare: (a, b) => (a.sizeGb ?? Infinity) - (b.sizeGb ?? Infinity)},
   {id: 'title', compare: (a, b) => a.title.localeCompare(b.title)}
 ];
 

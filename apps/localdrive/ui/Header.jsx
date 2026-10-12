@@ -22,7 +22,7 @@ const BADGE = <DownloadsBadge />;
 export function Header({children}) {
   const t = useT();
   const {rtl} = useLocale();
-  const {section, filters, on, step, keyOf} = useSections();
+  const {section, filters, sort, on, step, keyOf} = useSections();
   const wishlist = useWishlist();
   const favorites = wishlist.filter(id => getGame(id)).length;
   const nav = useNavActions();
@@ -114,10 +114,10 @@ export function Header({children}) {
                     onLayout={track('catalog')}
                     nextFocusDown={down}
                   />
-                  <Menu open={browsing} onClose={() => setBrowsing(false)} rows={genres.length + 2}>
+                  <Menu open={browsing} onClose={() => setBrowsing(false)} rows={genres.length + 4}>
                     <MenuItem
                       label={t('nav.allGames')}
-                      checked={section === 'catalog' && !filters.genre.length}
+                      checked={section === 'catalog' && !filters.genre.length && sort !== 'smallest'}
                       autoFocus={!onlyGenre}
                       onSelect={() => on.show(NO_FILTERS, 'relevance')}
                     />
@@ -130,6 +130,12 @@ export function Header({children}) {
                         onSelect={() => on.show({...NO_FILTERS, genre: [genre]}, 'relevance')}
                       />
                     ))}
+                    <MenuDivider />
+                    <MenuItem
+                      label={t('nav.fileSize')}
+                      checked={section === 'catalog' && !activeCount(filters) && sort === 'smallest'}
+                      onSelect={() => on.show(NO_FILTERS, 'smallest')}
+                    />
                   </Menu>
                 </View>
               </View>

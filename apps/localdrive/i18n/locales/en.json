@@ -338,6 +338,7 @@
   "sort.rating": "Top rated",
   "sort.relevance": "Most popular",
   "sort.size": "Largest installs",
+  "sort.smallest": "Smallest first",
   "sort.title": "A–Z",
   "sources.browserNote": "Each part opens a host's page, then you type its file link with the controller.",
   "sources.cdnFastest": "Fastest",
@@ -400,5 +401,6 @@
   "capture.preparing": "Preparing the file verification…",
   "capture.capturing": "Complete verification and select Download",
   "capture.validating": "Checking the captured file…",
-  "capture.detail": "Return here after selecting Download. Your download starts automatically when the file is verified. Capture lasts up to 3 minutes."
+  "capture.detail": "Return here after selecting Download. Your download starts automatically when the file is verified. Capture lasts up to 3 minutes.",
+  "nav.fileSize": "File size"
 }

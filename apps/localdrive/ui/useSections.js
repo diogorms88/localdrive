@@ -33,6 +33,7 @@ function sectionOf({filters, sort}, query) {
   if (filters.wishlist) return 'favorites';
   if (sort === 'rating') return 'top';
   if (sort === 'newest') return 'new';
+  if (sort === 'smallest') return 'catalog';
   if (activeCount(filters) > 0 || query) return 'catalog';
   return 'discover';
 }
@@ -74,6 +75,7 @@ export function useSections() {
   return {
     section,
     filters: store.filters,
+    sort: store.sort,
     on,
     step,
     // The page's top elements go up to `nav:current`, the current section's item, like a PS5 tab
