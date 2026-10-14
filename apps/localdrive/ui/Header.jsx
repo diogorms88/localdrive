@@ -10,6 +10,7 @@ import {useNavActions, useNavState, useIsImmersive} from '../state/nav.jsx';
 import {ButtonGlyph} from './ButtonHints.jsx';
 import {Menu, MenuItem, MenuDivider} from './Menu.jsx';
 import {useSections} from './useSections.js';
+import {hasSuperPsxGame} from '../superpsx/source.js';
 import {DownloadToast} from './DownloadToast.jsx';
 import {DownloadsBadge} from './DownloadsBadge.jsx';
 import {LanguageSheet} from './LanguageSheet.jsx';
@@ -24,12 +25,12 @@ export function Header({children}) {
   const {rtl} = useLocale();
   const {section, filters, sort, on, step, keyOf} = useSections();
   const wishlist = useWishlist();
-  const favorites = wishlist.filter(id => getGame(id) || isPs2Game(id)).length;
+  const favorites = wishlist.filter(id => getGame(id) || isPs2Game(id) || hasSuperPsxGame(id)).length;
   const nav = useNavActions();
   const {top} = useNavState();
   const [browsing, setBrowsing] = useState(false);
   const [choosingPlatform, setChoosingPlatform] = useState(false);
-  const platform = section === 'platform' && (top.name === 'ps2' ? 'ps2' : filters.platform[0]);
+  const platform = section === 'platform' && (top.name === 'ps2' || top.name === 'ps2game' ? 'ps2' : top.name === 'superpsx' || top.name === 'superpsxgame' ? 'superpsx' : filters.platform[0]);
   const [choosingLanguage, setChoosingLanguage] = useState(false);
   const immersive = useIsImmersive();
   const [layouts, track] = useNavLayouts();
@@ -157,11 +158,11 @@ export function Header({children}) {
                     onLayout={track('platform')}
                     nextFocusDown={down}
                   />
-                  <Menu open={choosingPlatform} onClose={() => setChoosingPlatform(false)} rows={3}>
+                  <Menu open={choosingPlatform} onClose={() => setChoosingPlatform(false)} rows={4}>
                     <MenuItem
                       label="PS4"
                       checked={platform === 'ps4'}
-                      autoFocus={platform !== 'ps5' && platform !== 'ps2'}
+                      autoFocus={platform !== 'ps5' && platform !== 'ps2' && platform !== 'superpsx'}
                       onSelect={() => on.platform('ps4')}
                     />
                     <MenuItem
@@ -175,6 +176,12 @@ export function Header({children}) {
                       checked={platform === 'ps2'}
                       autoFocus={platform === 'ps2'}
                       onSelect={on.ps2}
+                    />
+                    <MenuItem
+                      label="SuperPSX"
+                      checked={platform === 'superpsx'}
+                      autoFocus={platform === 'superpsx'}
+                      onSelect={on.superpsx}
                     />
                   </Menu>
                 </View>

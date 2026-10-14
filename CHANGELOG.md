@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added SuperPSX as an individual option in the Platform menu. Its PS5 library browses pages 1–40, opens each game in a LocalDrive detail screen with loaded description and art, and offers a separate action to open the source page.
+- SuperPSX covers now load straight from the library pages (the site lazy-loads them as a `data-bgset`
+  background, which the parser missed), so cards no longer wait for each game's page to show art. The
+  site's download button no longer appears among a game's screenshots.
+
 ## LocalDrive v0.0.22
 
 - A “LocalDrive Downloads” shortcut for following background downloads during a game: while they run,

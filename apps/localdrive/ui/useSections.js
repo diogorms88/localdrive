@@ -3,6 +3,7 @@ import {activeCount, NO_FILTERS} from '../state/catalog.js';
 import {useStoreActions, useStoreState, useQueryActive} from '../state/store.jsx';
 import {useNavActions, useNavState} from '../state/nav.jsx';
 import {reshufflePs2Featured} from '../ps2/Ps2Screen.jsx';
+import {superPsxBrowse} from '../superpsx/library.js';
 
 const KEYS = {
   search: 'nav:search',
@@ -70,7 +71,7 @@ export function useSections() {
         ? null
         : top.name === 'add' || top.name === 'homebrew'
           ? 'add'
-          : top.name === 'ps2' || top.name === 'ps2game'
+          : top.name === 'ps2' || top.name === 'ps2game' || top.name === 'superpsx' || top.name === 'superpsxgame'
             ? 'platform'
             : underneath;
   const topName = useRef(top.name);
@@ -87,6 +88,11 @@ export function useSections() {
       if (topName.current === 'ps2') return;
       reshufflePs2Featured();
       nav.push({name: 'ps2'}, 'nav:platform');
+    },
+    superpsx: () => {
+      if (topName.current === 'superpsx') return;
+      superPsxBrowse.reset();
+      nav.push({name: 'superpsx'}, 'nav:platform');
     },
     favorites: () => show({...NO_FILTERS, wishlist: true}, 'relevance'),
     downloads: () => topName.current !== 'downloads' && nav.push({name: 'downloads'}, 'nav:downloads'),

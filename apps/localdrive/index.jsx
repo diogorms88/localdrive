@@ -15,6 +15,8 @@ import {HomebrewScreen} from './homebrew/HomebrewScreen.jsx';
 import {HomebrewPage} from './homebrew/HomebrewPage.jsx';
 import {Ps2Screen} from './ps2/Ps2Screen.jsx';
 import {Ps2GamePage} from './ps2/Ps2GamePage.jsx';
+import {SuperPsxScreen} from './superpsx/SuperPsxScreen.jsx';
+import {SuperPsxGamePage} from './superpsx/SuperPsxGamePage.jsx';
 import {useInterfaceHaptics} from './ui/haptics.js';
 import {Header} from './ui/Header.jsx';
 import {Splash} from './ui/Splash.jsx';
@@ -37,6 +39,8 @@ function Screen({screen: screen}) {
   if (screen.name === 'homebrew') return <HomebrewPage id={screen.id} />;
   if (screen.name === 'ps2') return <Ps2Screen />;
   if (screen.name === 'ps2game') return <Ps2GamePage id={screen.id} />;
+  if (screen.name === 'superpsx') return <SuperPsxScreen />;
+  if (screen.name === 'superpsxgame') return <SuperPsxGamePage id={screen.id} />;
   return <SearchScreen onBack={pop} onOpenGame={openCard} />;
 }
 
@@ -72,7 +76,7 @@ function App() {
   }, []);
   const {top} = useNavState();
   const onBrowse = top.name === 'browse';
-  const key = top.name === 'game' || top.name === 'ps2game' ? `${top.name}:${top.id}` : top.name;
+  const key = top.name === 'game' || top.name === 'ps2game' || top.name === 'superpsxgame' ? `${top.name}:${top.id}` : top.name;
   const immersive = useIsImmersive();
   const {rtl} = useLocale();
   return (
