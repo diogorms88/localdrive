@@ -134,7 +134,7 @@ def main():
                ROOT / "native/ps5/filesystem_access.cpp",
                ROOT / "native/ps5/elevation_transport.cpp",
                ROOT / "native/shared/host_api.cpp", ROOT / "native/shared/removals.cpp", ROOT / "native/shared/network.cpp",
-               ROOT / "native/shared/network_api.cpp", ROOT / "native/shared/archives.cpp", ROOT / "native/shared/archive_preflight.cpp", ROOT / "native/shared/rar5_password.cpp", ROOT / "native/shared/archive_writer.cpp", ROOT / "native/shared/archive_api.cpp", ROOT / "native/shared/browser_capture_api.cpp", ROOT / "native/ps5/browser_capture.cpp", ROOT / "native/shared/package_api.cpp", ROOT / "native/ps5/package_installer.cpp", ROOT / "native/ps5/payload_loader.cpp", ROOT / "native/ps5/relaunch.cpp", ROOT / "native/ps5/crash_log.cpp", ROOT / "native/ps5/utf8_locale.cpp", ROOT / "native/ps5/network_platform.cpp",
+               ROOT / "native/shared/network_api.cpp", ROOT / "native/shared/archives.cpp", ROOT / "native/shared/archive_preflight.cpp", ROOT / "native/shared/rar5_password.cpp", ROOT / "native/shared/archive_writer.cpp", ROOT / "native/shared/archive_api.cpp", ROOT / "native/shared/browser_capture_api.cpp", ROOT / "native/ps5/browser_capture.cpp", ROOT / "native/shared/package_api.cpp", ROOT / "native/ps5/package_installer.cpp", ROOT / "native/ps5/payload_loader.cpp", ROOT / "native/ps5/relaunch.cpp", ROOT / "native/ps5/background_downloads.cpp", ROOT / "native/shared/download_handoff.cpp", ROOT / "native/ps5/crash_log.cpp", ROOT / "native/ps5/utf8_locale.cpp", ROOT / "native/ps5/network_platform.cpp",
                ROOT / "native/shared/image_loader.cpp", ROOT / "native/shared/image_api.cpp",
                ROOT / "native/shared/sound_api.cpp", generated / "sounds.generated.c",
                ROOT / "native/shared/gl_presenter.cpp",
@@ -205,6 +205,17 @@ def main():
     run([sdk / "bin/prospero-clang", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-o", relauncher,
          ROOT / "native/ps5/payloads/relauncher.c", "-lSceUserService", "-lSceSystemService"],
         env=env, log=BUILD / "relauncher.log")
+    # Carries the app's downloads on after it closes, which the app's own process cannot outlive. It
+    # builds the engine's download service with PacBrew's libcurl, which targets this payload SDK.
+    daemon = BUILD / "download-daemon.elf"
+    ports_root = archive_ports
+    run([sdk / "bin/prospero-clang++", "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-DPROSPERO=1", "-DPS5_REACT_PAYLOAD=1",
+         "-I", ROOT / "native/shared", "-I", ROOT / "native/ps5/payloads/download_daemon_config", "-I", ports_root / "include",
+         "-o", daemon, ROOT / "native/ps5/payloads/download_daemon.cpp", ROOT / "native/shared/network.cpp",
+         ROOT / "native/shared/download_handoff.cpp",
+         *[ports_root / "lib" / name for name in ("libcurl.a", "libssl.a", "libcrypto.a", "libpsl.a", "libzstd.a", "libz.a")],
+         builtins, "-lSceSystemService", "-lSceUserService"],
+        env=env, log=BUILD / "download-daemon.log")
     capture = BUILD / "browser-capture.elf"
     browser = ROOT / "native/ps5/payloads/browser"
     run([sdk / "bin/prospero-clang", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-o", capture,
@@ -222,6 +233,7 @@ def main():
     shutil.copy2(installer, app / "pkg-installer.elf")
     run([sdk / "bin/prospero-strip", "-o", app / "rar-extract.elf", rar_extract], env=env)
     shutil.copy2(relauncher, app / "relauncher.elf")
+    run([sdk / "bin/prospero-strip", "-o", app / "download-daemon.elf", daemon], env=env)
     shutil.copy2(capture, app / "browser-capture.elf")
     param = json.loads((hui / "sce_sys/param.json").read_text())
     param.update(titleId=TITLE, conceptId=TITLE[4:], contentId=config["contentId"], contentVersion=config["version"])

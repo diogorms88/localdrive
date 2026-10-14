@@ -2,6 +2,7 @@ import {t} from '../i18n/core.js';
 
 const LABELED = new Set([
   'awaiting-browser',
+  'background',
   'queued',
   'resolving',
   'connecting',
@@ -20,7 +21,7 @@ const LABELED = new Set([
   'extraction-required'
 ]);
 
-export const WAITING = ['resolving', 'connecting', 'verifying', 'pausing'];
+export const WAITING = ['resolving', 'connecting', 'verifying', 'pausing', 'background'];
 
 export const hasStateLabel = state => LABELED.has(state);
 

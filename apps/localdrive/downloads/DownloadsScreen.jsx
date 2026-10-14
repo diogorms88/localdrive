@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {View, Text, FocusScope, ScrollView} from '@ps5-react/core';
+import {View, Text, FocusScope, ScrollView, BackHandler} from '@ps5-react/core';
 import {fitBytes, SPAN_MAX} from '../i18n/fit.js';
 import {t, formatNumber} from '../i18n/core.js';
 import {useT} from '../i18n/index.js';
@@ -47,7 +47,7 @@ function rowGame(job) {
 function summary(jobs) {
   const count = states => jobs.filter(job => states.includes(job.state)).length;
   return [
-    [count(BUSY), 'inProgress'],
+    [count([...BUSY, 'background']), 'inProgress'],
     [count(['paused', 'awaiting-browser']), 'paused'],
     [count(['failed']), 'failed'],
     [count(COMPLETE), 'completed']
@@ -141,6 +141,26 @@ export function DownloadsScreen({onBack, onOpenGame}) {
     } catch {}
   }, []);
   const [failure, setFailure] = useState('');
+  const [preparing, setPreparing] = useState(false);
+  // Hands the downloads to the console's background downloader, which starts once LocalDrive has closed.
+  const toBackground = () => {
+    if (preparing) return;
+    setFailure('');
+    setPreparing(true);
+    downloadQueue()
+      .background()
+      .then(
+        () => BackHandler.exitApp(),
+        caught => {
+          setPreparing(false);
+          setFailure(caught.message);
+        }
+      );
+  };
+  let backgroundable = false;
+  try {
+    backgroundable = downloadQueue().backgroundable;
+  } catch {}
   const {focusLater} = useNavActions();
   const focused = useRef(null);
   const latest = useRef(jobs);
@@ -181,7 +201,7 @@ export function DownloadsScreen({onBack, onOpenGame}) {
     else return false;
     return true;
   };
-  const active = jobs.filter(job => BUSY.includes(job.state));
+  const active = jobs.filter(job => BUSY.includes(job.state) || job.state === 'background');
   const stopped = jobs.filter(job => ['paused', 'failed', 'awaiting-browser'].includes(job.state));
   const done = jobs.filter(job => COMPLETE.includes(job.state));
   const first = active[0] ?? stopped[0] ?? done[0];
@@ -244,6 +264,7 @@ export function DownloadsScreen({onBack, onOpenGame}) {
           )}
           <SummaryPanel
             error={error}
+            background={backgroundable || preparing ? {preparing, onPress: toBackground} : null}
             onFocus={() => {
               focused.current = null;
             }}

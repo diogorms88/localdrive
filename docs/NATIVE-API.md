@@ -151,6 +151,13 @@ PS5 builds require `networking: true` and `filesystemAccess: "console"`; desktop
 networking is available by default. See [NETWORKING.md](NETWORKING.md) for
 options, resource limits, errors, lifecycle and the hardware-validation gap.
 
+`Downloads.background({files, tasks, status, texts})` (ABI v9) hands downloads to
+`download-daemon.elf`, which carries them on after the app closes, so they run
+while a game plays. It is PS5 only and needs the payload loader on
+`127.0.0.1:9021`; the preview returns the reason it cannot. See
+[Background downloads](NETWORKING.md#background-downloads). **Not yet validated on
+hardware.**
+
 ## Images
 
 `<Image source={{uri}}>` loads `http://` and `https://` URLs natively: fetched

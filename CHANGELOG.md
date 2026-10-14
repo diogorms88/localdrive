@@ -1,5 +1,14 @@
 # Changelog
 
+## LocalDrive v0.0.20
+
+- Downloads can continue in the background while you play: “Download in background” on the Downloads
+  tab closes LocalDrive and hands the queued and running downloads to `download-daemon.elf`, a payload
+  the PS5's payload loader runs after LocalDrive closes. Console notifications show each game at 25%,
+  50% and 75% and when it finishes or stops. Opening LocalDrive takes the downloads back: finished
+  files are recognized without downloading them again, the rest resume, and extraction or
+  installation runs as before. Needs the payload loader on port 9021. Not yet tested on a PS5.
+
 ## LocalDrive v0.0.19
 
 - Fixed images that stayed blank after browsing for a while, such as a PS2 game's large screenshot and

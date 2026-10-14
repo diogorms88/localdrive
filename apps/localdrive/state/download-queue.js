@@ -12,6 +12,12 @@ const MAX_PARALLEL_DOWNLOADS = 3;
 
 export const BUSY = ['queued', ...ACTIVE];
 
+// Tasks the console's background downloader can carry on: still transferring, nothing to extract or install yet.
+const HANDOFF = ['queued', 'resolving', 'connecting', 'downloading', 'verifying'];
+
+// How long a background downloader that stopped reporting is waited for before the app takes its files back.
+const BACKGROUND_SILENCE_MS = 30000;
+
 // Payload Manager scans /data/pldmgr and its subfolders for .elf and .bin payloads.
 export const payloadDir = root => `${root.replace(/\/+$/, '')}/pldmgr/payloads`;
 
@@ -93,6 +99,8 @@ export function createDownloadQueue({
   const workerFor = job => active.get(job.id);
   let ticks = 0;
   let awake = false;
+  // Set once the queue handed its downloads to the background downloader: nothing starts until the app closes.
+  let toBackground = false;
   const modified = path => {
     try {
       return fs.stat(path)?.modified ?? 0;
@@ -158,6 +166,78 @@ export function createDownloadQueue({
     } catch (error) {
       console.log(`[download-queue] queue not saved to ${file}: ${error.message}`);
     }
+  }
+  // The background downloader's report (native/ps5/payloads/download_daemon.cpp).
+  const statusFile = `${directory}/background-status`;
+  function readBackground() {
+    let text;
+    try {
+      if (!fs.exists(statusFile)) return null;
+      text = fs.readFile(statusFile);
+    } catch {
+      return null;
+    }
+    const [head = '', ...lines] = text.split('\n').filter(Boolean);
+    const [magic, state, seconds] = head.split(' ');
+    if (magic !== 'LDS1') return null;
+    const files = [];
+    for (const line of lines) {
+      const [index, fileState, written, total, speed, ...error] = line.split(' ');
+      files[Number(index)] = {
+        state: fileState,
+        written: Number(written) || 0,
+        total: total === '-' ? null : Number(total),
+        bytesPerSecond: Number(speed) || 0,
+        error: error.join(' ')
+      };
+    }
+    return {state, heartbeat: Number(seconds) * 1000, files};
+  }
+  // While the background downloader still holds files, shows its progress; once it stopped (the app
+  // opening stops it) or went silent, the queue takes the tasks back. Finished files then recover
+  // from their completion receipts and unfinished ones resume from their checkpoints.
+  function followBackground(since = Date.now()) {
+    const held = jobs.filter(job => job.state === 'background');
+    if (!held.length) return;
+    const status = readBackground();
+    for (const job of held) {
+      for (const {file, part} of job.background || []) {
+        const report = status?.files[file];
+        if (!report) continue;
+        if (part === void 0) {
+          job.written = report.written;
+          job.total = report.total ?? job.total;
+        } else {
+          job.parts[part].written = report.written;
+          job.written = job.parts.reduce((sum, item) => sum + item.written, 0);
+        }
+      }
+      job.bytesPerSecond = (job.background || []).reduce(
+        (sum, {file}) => sum + (status?.files[file]?.bytesPerSecond || 0),
+        0
+      );
+    }
+    const now = Date.now();
+    const over = status
+      ? ['stopped', 'finished'].includes(status.state) || now - status.heartbeat > BACKGROUND_SILENCE_MS
+      : now - since > BACKGROUND_SILENCE_MS / 2;
+    if (!over) {
+      emit();
+      setTimeout(() => followBackground(since), 1000);
+      return;
+    }
+    console.log(`[download-queue] background downloader ${status?.state ?? 'silent'}; taking ${held.length} back`);
+    for (const job of held) {
+      delete job.background;
+      job.state = 'queued';
+      job.bytesPerSecond = 0;
+      job.message = '';
+    }
+    try {
+      if (fs.exists(statusFile)) fs.remove(statusFile);
+    } catch {}
+    change();
+    pump();
   }
   const find = id => {
     const job = jobs.find(item => item.id === id);
@@ -289,6 +369,71 @@ export function createDownloadQueue({
   const extractExclusive = (job, files, streamed) =>
     exclusivePostprocess(() => extract(job, files, streamed));
   const canInstall = () => Boolean(packages) && platform === 'ps5';
+  // `sharing`: downloads running at once, which split the connections between them.
+  const fileOptions = (job, sharing) => ({
+    ...job.options,
+    rejectHtml: true,
+    mirrors: void 0,
+    // A release may cap its connections when the host refuses parallel ranges (CDRomance allows one per IP).
+    connections: job.release.connections || Math.max(8, Math.floor(64 / Math.max(1, sharing))),
+    adaptive: true,
+    rangeBytes: 32 * 1024 * 1024,
+    destination: job.downloadDestination,
+    storageRoot: job.root,
+    recoverCompleted: true
+  });
+  const partOptions = (job, part, sharing) => ({
+    ...part.options,
+    rejectHtml: true,
+    connections: Math.max(8, Math.floor(64 / Math.max(1, sharing))),
+    adaptive: true,
+    destination: part.destination,
+    storageRoot: job.root,
+    recoverCompleted: true
+  });
+  async function resolveFile(job, signal) {
+    if (job.release.manifestUrl) {
+      const response = await http.request(job.release.manifestUrl, {maxBytes: 4 * 1024 * 1024, signal});
+      if (!response.ok) throw new Error(`Manifest HTTP ${response.status}. Choose another source or retry.`);
+      job.options = formats.manifest(await response.json());
+    } else {
+      if (!job.release.url && !job.release.browserUrl) throw new Error('This release has no download URL.');
+      const resolved =
+        job.directURL || sourceKind(job.release) !== 'direct'
+          ? await sources.resolve(job.release, {signal, directURL: job.directURL})
+          : {url: webURL(job.release.url).url};
+      job.options = {
+        ...resolved,
+        rejectHtml: true,
+        expectedBytes: job.release.sizeBytes || void 0,
+        sha256: job.release.sha256 || void 0
+      };
+      delete job.directURL;
+    }
+    job.total = job.options.expectedBytes || null;
+    change();
+  }
+  async function resolvePart(job, index, signal) {
+    const part = job.parts[index];
+    const source = job.release.parts[index].sources[part.sourceIndex || 0];
+    job.currentSource = source;
+    const resolved = await sources.resolve(source, {signal, directURL: job.directURL});
+    part.options = {
+      ...resolved,
+      expectedBytes: source.sizeBytes || void 0,
+      sha256: source.sha256 || void 0
+    };
+    delete job.directURL;
+    change();
+  }
+  const setParts = job =>
+    job.parts ||
+    (job.parts = job.release.parts.map(part => ({
+      number: part.number,
+      destination: `${job.artifact.directory}/part-${part.number}.bin`,
+      written: 0,
+      completed: false
+    })));
   async function execute(job) {
     let task;
     let unsubscribe;
@@ -309,30 +454,7 @@ export function createDownloadQueue({
       }
       job.downloadDestination || (job.downloadDestination = job.artifact.destination);
       if (job.routing) finishRouting(job);
-      if (!job.options) {
-        if (job.release.manifestUrl) {
-          const response = await http.request(job.release.manifestUrl, {maxBytes: 4 * 1024 * 1024, signal});
-          if (!response.ok)
-            throw new Error(`Manifest HTTP ${response.status}. Choose another source or retry.`);
-          job.options = formats.manifest(await response.json());
-        } else {
-          if (!job.release.url && !job.release.browserUrl)
-            throw new Error('This release has no download URL.');
-          const resolved =
-            job.directURL || sourceKind(job.release) !== 'direct'
-              ? await sources.resolve(job.release, {signal, directURL: job.directURL})
-              : {url: webURL(job.release.url).url};
-          job.options = {
-            ...resolved,
-            rejectHtml: true,
-            expectedBytes: job.release.sizeBytes || void 0,
-            sha256: job.release.sha256 || void 0
-          };
-          delete job.directURL;
-        }
-        job.total = job.options.expectedBytes || null;
-        change();
-      }
+      if (!job.options) await resolveFile(job, signal);
       if (job.state === 'pausing') return;
       const root = storageIdentity(job);
       if (!job.rootIdentity) {
@@ -347,18 +469,7 @@ export function createDownloadQueue({
         throw new Error('Not enough space on the selected drive. Free space and retry.');
       fs.mkdir(job.artifact.directory, {recursive: true});
       worker.transferring = true;
-      task = downloads.enqueue({
-        ...job.options,
-        rejectHtml: true,
-        mirrors: void 0,
-        // A release may cap its connections when the host refuses parallel ranges (CDRomance allows one per IP).
-        connections: job.release.connections || Math.max(8, Math.floor(64 / Math.max(1, active.size))),
-        adaptive: true,
-        rangeBytes: 32 * 1024 * 1024,
-        destination: job.downloadDestination,
-        storageRoot: job.root,
-        recoverCompleted: true
-      });
+      task = downloads.enqueue(fileOptions(job, active.size));
       worker.task = task;
       unsubscribe = task.subscribe(progress => {
         if (job.state === 'pausing') return;
@@ -728,13 +839,7 @@ export function createDownloadQueue({
     const root = storageIdentity(job);
     if (!job.rootIdentity) job.rootIdentity = root;
     fs.mkdir(job.artifact.directory, {recursive: true});
-    job.parts ||
-      (job.parts = job.release.parts.map(part => ({
-        number: part.number,
-        destination: `${job.artifact.directory}/part-${part.number}.bin`,
-        written: 0,
-        completed: false
-      })));
+    setParts(job);
     let streamed = null;
     try {
       for (let index = 0; index < job.parts.length; index++) {
@@ -753,18 +858,8 @@ export function createDownloadQueue({
         job.message = t('downloads.part', {part: index + 1, parts: job.parts.length});
         workerFor(job).transferring = false;
         change();
-        const source = job.release.parts[index].sources[part.sourceIndex || 0];
-        job.currentSource = source;
-        if (!part.options) {
-          const resolved = await sources.resolve(source, {signal, directURL: job.directURL});
-          part.options = {
-            ...resolved,
-            expectedBytes: source.sizeBytes || void 0,
-            sha256: source.sha256 || void 0
-          };
-          delete job.directURL;
-          change();
-        }
+        job.currentSource = job.release.parts[index].sources[part.sourceIndex || 0];
+        if (!part.options) await resolvePart(job, index, signal);
         if (job.state === 'pausing') return;
         storageIdentity(job);
         if (
@@ -775,15 +870,7 @@ export function createDownloadQueue({
             'Not enough space for the remaining volumes and their extraction. Free space and resume.'
           );
         workerFor(job).transferring = true;
-        const task = downloads.enqueue({
-          ...part.options,
-          rejectHtml: true,
-          connections: Math.max(8, Math.floor(64 / Math.max(1, active.size))),
-          adaptive: true,
-          destination: part.destination,
-          storageRoot: job.root,
-          recoverCompleted: true
-        });
+        const task = downloads.enqueue(partOptions(job, part, active.size));
         workerFor(job).task = task;
         const off = task.subscribe(progress => {
           if (job.state === 'pausing') return;
@@ -856,7 +943,7 @@ export function createDownloadQueue({
     );
   }
   function pump(first) {
-    if (captures.size) return;
+    if (captures.size || toBackground) return;
     while (active.size < MAX_PARALLEL_DOWNLOADS) {
       const workers = [...active.values()];
       if (workers.some(worker => worker.job.release.parts)) return;
@@ -870,7 +957,7 @@ export function createDownloadQueue({
       if (!job) return;
       const worker = {job: job, task: null};
       active.set(job.id, worker);
-      void execute(job);
+      worker.done = execute(job);
       if (job.release.parts) return;
     }
   }
@@ -1017,6 +1104,7 @@ export function createDownloadQueue({
     change();
     pump(running);
   }
+  followBackground();
   function stopCapture(job) {
     const session = captures.get(job.id);
     if (session) {
@@ -1316,10 +1404,139 @@ export function createDownloadQueue({
     get awake() {
       return awake;
     },
+    /** Whether `background` has something to hand over: a queued or running download on a PS5. */
+    get backgroundable() {
+      return (
+        platform === 'ps5' &&
+        Boolean(downloads.background) &&
+        !toBackground &&
+        jobs.some(job => HANDOFF.includes(job.state) && !job.install && !job.routing)
+      );
+    },
+    /**
+     * Hands the queued and running downloads to the console's background downloader, which carries
+     * them on while LocalDrive is closed (a game may run). True once it holds them: close the app now,
+     * since it starts when LocalDrive has closed. Opening LocalDrive again takes them back.
+     */
+    async background() {
+      if (toBackground) return true;
+      if (captures.size || jobs.some(job => ['extracting', 'installing', 'pausing'].includes(job.state)))
+        throw new Error(t('downloads.background.busy'));
+      const chosen = jobs.filter(job => HANDOFF.includes(job.state) && !job.install && !job.routing);
+      if (!chosen.length) throw new Error(t('downloads.background.none'));
+      toBackground = true;
+      const stopping = [];
+      for (const job of chosen) {
+        const worker = workerFor(job);
+        if (worker) {
+          job.state = 'pausing';
+          worker.cancel?.cancel();
+          worker.task?.cancel();
+          stopping.push(worker.done);
+        } else job.state = 'paused';
+      }
+      change();
+      await Promise.all(stopping);
+      // A download that finished or failed while stopping keeps that outcome.
+      const stopped = chosen.filter(job => job.state === 'paused');
+      const sharing = Math.min(MAX_PARALLEL_DOWNLOADS, stopped.length);
+      const signal = cancellation().signal;
+      const tasks = [],
+        files = [],
+        handed = [];
+      for (const job of stopped) {
+        // A task that cannot be prepared now (a source that needs the browser, a full drive) stays queued.
+        try {
+          if (!job.rootIdentity) job.rootIdentity = storageIdentity(job);
+          else storageIdentity(job);
+          fs.mkdir(job.artifact.directory, {recursive: true});
+          const task = tasks.length;
+          const mine = [];
+          if (job.release.parts) {
+            if (job.release.unavailableReason) throw new Error(job.release.unavailableReason);
+            setParts(job);
+            if (fs.diskUsage(job.root).free < setNeed(job) + MARGIN) throw new Error('Not enough space.');
+            for (let index = 0; index < job.parts.length; index++) {
+              const part = job.parts[index];
+              if (part.completed && fs.exists(part.destination)) continue;
+              if (!part.options) await resolvePart(job, index, signal);
+              mine.push({file: files.length + mine.length, part: index});
+            }
+            files.push(
+              ...mine.map(({part}) => ({...partOptions(job, job.parts[part], sharing), task}))
+            );
+            tasks.push({
+              title: job.title,
+              done: job.parts.reduce((sum, part) => sum + (part.completed ? part.written : 0), 0),
+              total: job.total || 0
+            });
+          } else {
+            job.downloadDestination || (job.downloadDestination = job.artifact.destination);
+            if (!job.options) await resolveFile(job, signal);
+            const held = Math.max(job.written, fs.stat(`${job.downloadDestination}.part`)?.size || 0);
+            if (
+              !fs.exists(job.downloadDestination) &&
+              fs.diskUsage(job.root).free < stillNeeded({...job, written: held}) + MARGIN
+            )
+              throw new Error('Not enough space.');
+            mine.push({file: files.length});
+            files.push({...fileOptions(job, sharing), task});
+            tasks.push({title: job.title, done: 0, total: job.total || 0});
+          }
+          if (mine.length) handed.push([job, mine]);
+        } catch (error) {
+          console.log(`[download-queue] ${job.title} stays in the queue: ${error.message}`);
+        }
+      }
+      const giveBack = () => {
+        toBackground = false;
+        for (const job of stopped) job.state = 'queued';
+        change();
+        pump();
+      };
+      if (!handed.length) {
+        giveBack();
+        throw new Error(t('downloads.background.none'));
+      }
+      try {
+        if (fs.exists(statusFile)) fs.remove(statusFile);
+      } catch {}
+      const placeholders = {title: '{title}', percent: '{percent}'};
+      let result;
+      try {
+        result = downloads.background({
+          files,
+          tasks,
+          status: statusFile,
+          texts: {
+            progress: t('downloads.background.progress', placeholders),
+            complete: t('downloads.background.complete', placeholders),
+            failed: t('downloads.background.failed', placeholders)
+          }
+        });
+      } catch (error) {
+        result = error.message;
+      }
+      if (result !== true) {
+        giveBack();
+        throw new Error(result);
+      }
+      // Tasks left out stay queued: the next launch starts them again.
+      for (const job of stopped) job.state = 'queued';
+      for (const [job, mine] of handed) {
+        job.state = 'background';
+        job.background = mine;
+        job.bytesPerSecond = 0;
+        job.error = '';
+        job.message = '';
+      }
+      change();
+      return true;
+    },
     /** Discards the partial file and forgets the task; an active one is paused first. */
     cancel(id) {
       const job = find(id);
-      if (COMPLETE.includes(job.state)) return;
+      if (COMPLETE.includes(job.state) || job.state === 'background') return;
       if (active.has(job.id)) {
         job.cancelling = true;
         this.pause(id);

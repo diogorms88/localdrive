@@ -542,7 +542,15 @@ bool configure_transport(void* handle, const std::string& url, bool follow_redir
     // high-latency origins; 2 MiB matches what Spectrum requests. A refusal keeps the default.
     int window = 2*1024*1024;
     setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &window, sizeof window);
-    return setsockopt(fd, SOL_SOCKET, 0x1200, &enabled, sizeof enabled) == 0 ? CURL_SOCKOPT_OK : CURL_SOCKOPT_ERROR;
+    const bool nonblocking = setsockopt(fd, SOL_SOCKET, 0x1200, &enabled, sizeof enabled) == 0;
+#ifdef PS5_REACT_PAYLOAD
+    // A loader payload (download-daemon.elf) gets nonblocking sockets from libcurl's own fcntl call;
+    // the native-title option is only a hint there.
+    (void)nonblocking;
+    return CURL_SOCKOPT_OK;
+#else
+    return nonblocking ? CURL_SOCKOPT_OK : CURL_SOCKOPT_ERROR;
+#endif
   });
 #endif
   return ok;

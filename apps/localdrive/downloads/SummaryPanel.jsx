@@ -5,6 +5,7 @@ import {formatBytes} from '../state/size.js';
 import {downloadQueue, driveName, storageRoots} from '../state/downloads.js';
 import {useActivity} from './useQueue.js';
 import {ProgressBar} from '../ui/ProgressBar.jsx';
+import {Button} from '../ui/Button.jsx';
 import {formatSpeed, formatDuration} from './format.js';
 import '../assets/Inter-Regular.ttf';
 
@@ -149,11 +150,33 @@ function Drive({root: root, focusKey, onFocus}) {
   );
 }
 
-export function SummaryPanel({error: error, onFocus}) {
+// Closes LocalDrive and lets the console's background downloader carry the queue on while a game plays.
+function Background({preparing, onPress, onFocus}) {
+  const t = useT();
+  return (
+    <Block title={t('downloads.background.title')}>
+      <View style={{gap: 18, paddingHorizontal: 12}}>
+        <Button
+          variant="primary"
+          icon="download"
+          label={t(preparing ? 'downloads.background.preparing' : 'downloads.background.button')}
+          onFocus={onFocus}
+          onPress={onPress}
+        />
+        <Text style={{fontFamily: 'Inter-Regular', fontSize: 21, color: '#8a8a94', lineHeight: 30}}>
+          {t('downloads.background.note')}
+        </Text>
+      </View>
+    </Block>
+  );
+}
+
+export function SummaryPanel({error: error, background, onFocus}) {
   const t = useT();
   return (
     <ScrollView style={{width: 420}}>
       <View style={{gap: 30, paddingBottom: 36}}>
+        {background ? <Background {...background} onFocus={onFocus} /> : null}
         {error ? null : <Activity onFocus={onFocus} />}
         <Block title={t('downloads.panel.storage')}>
           {storageRoots().map((root, index) => (

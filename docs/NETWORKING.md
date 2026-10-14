@@ -128,6 +128,56 @@ explicit restart that discards its exclusively owned partial and sidecars after
 cancellation has finished. Never discard or overwrite an existing final file
 to make a retry succeed.
 
+## Background downloads
+
+An app's process ends when it closes, and its downloads end with it. On PS5,
+`Downloads.background` hands them to `download-daemon.elf`
+(`native/ps5/payloads/download_daemon.cpp`, shipped in the app folder), which the
+host sends to the payload loader on `127.0.0.1:9021`, like `relauncher.elf`. The
+daemon outlives the app and runs this same download service, so the files it
+leaves are the ones `Downloads.enqueue` resumes or recovers.
+
+```js
+import {BackHandler, Downloads} from '@ps5-react/core';
+
+// Stop this app's own tasks for these files first: one owner at a time.
+const result = Downloads.background({
+  files: [{url, destination, storageRoot: '/data', expectedBytes, recoverCompleted: true, task: 0}],
+  tasks: [{title: 'Game', done: 0, total: expectedBytes}],
+  status: '/data/my-app/background-status',
+  texts: {progress: '{title}: {percent}%', complete: '{title} downloaded', failed: '{title} stopped'},
+});
+if (result === true) BackHandler.exitApp();
+```
+
+- **Files** take `enqueue`'s options; `task` indexes `tasks`, the units a
+  notification names (a multi-volume set is one task of several files). `done` is
+  what the app already finished of the task, `total` its whole size (0 when
+  unknown).
+- **Lifecycle.** The call returns `true` once the daemon holds the plan, or the
+  reason it cannot (no loader; an earlier daemon still running). The daemon starts
+  only after the app has closed, and gives up after 60 s if it does not. It runs
+  three files at a time and stops (each file at its last checkpoint) as soon as the
+  app runs again; the app then enqueues the same files, and those the daemon
+  finished recover from their completion receipts without the network.
+- **Notifications.** A system toast at each quarter of a task and when it ends;
+  `texts` may name `{title}` and `{percent}`.
+- **Status.** The daemon rewrites `status` every 2 seconds (and `status.log` with
+  its log):
+
+  ```text
+  LDS1 <waiting|running|stopped|finished> <unix seconds>
+  <file index> <state> <written> <total or -> <bytes per second> <error>
+  ```
+
+  Read it while the daemon still holds files; once it says `stopped` or
+  `finished`, or stops updating, the app owns the files again.
+
+A link that expires while the app is closed fails that file; the app resolves it
+again when it takes the task back. Extraction, installation and browser
+verification stay in the app. Rest mode, memory use while a game runs and the
+effect on games have not been measured.
+
 ## Split-file manifests and format routing
 
 ```js

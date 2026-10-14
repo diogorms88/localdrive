@@ -1,7 +1,7 @@
 // Copyright (C) 2026 half144 and PS5 React contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional attribution term: see LICENSE-ATTRIBUTION.
-// Native API contract (ABI v8) between the hosts and `@ps5-react/core`. The input actions hosts
+// Native API contract (ABI v9) between the hosts and `@ps5-react/core`. The input actions hosts
 // pass to `__ps5ReactDispatch` are a separate contract with its own version (runtime/js/input.js).
 //
 // host_api.cpp (shared) installs `globalThis.__ps5ReactNative` through
@@ -63,6 +63,12 @@
 //   packages.cancel(id)            stops reporting; an install the console accepted carries on
 //   packages.poll()                state/error/contentId/status/written/total; consumes terminal results
 //   network.version()              transport version string
+//   network.background({files, tasks, status, texts}) ABI v9; hands downloads to a downloader that outlives
+//                                  the app: files [{url, destination, options, task}] as network.download
+//                                  takes them, tasks [{title, done, total}] they belong to, status a file
+//                                  it reports to, texts {progress, complete, failed} for its toasts
+//                                  ({title}, {percent}); true once it holds them, or the reason it cannot
+//                                  (PS5: needs the payload loader on 127.0.0.1:9021; desktop: unsupported)
 //   image.load(url, width, height, fit, prefetch) {id, state, name, width, height, error, color}; takes a
 //                                  reference; fit: 0 cover, 1 contain, 2 stretch, 3 none; prefetch
 //                                  (optional) loads after drawn images; state 'loading' |
@@ -90,6 +96,9 @@
 
 namespace hui::audio {
 class Mixer;
+}
+namespace handoff {
+struct Plan;
 }
 
 extern "C" {
@@ -149,6 +158,10 @@ struct CallScope {
 // Opens the app again once it has closed: PS5 sends relauncher.elf to the payload loader, the desktop
 // preview runs itself again. False with a reason in `error` (at most `size` bytes) when it cannot.
 bool arrange_relaunch(char* error, std::size_t size);
+// Hands `plan`'s downloads to a downloader that carries them on after the app closes (PS5:
+// download-daemon.elf through the payload loader), filling in the app's title ID. False with a reason
+// in `error` when it cannot.
+bool start_background(handoff::Plan& plan, char* error, std::size_t size);
 
 struct DeviceInfo {
   char model[64] = "";

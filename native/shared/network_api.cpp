@@ -3,6 +3,7 @@
 // Additional attribution term: see LICENSE-ATTRIBUTION.
 #include "host_api.hpp"
 #include "network.hpp"
+#include "download_handoff.hpp"
 #include <cmath>
 #include <cstring>
 #include <climits>
@@ -121,46 +122,67 @@ bool headers(JSContext* ctx, JSValueConst options, network::Request& request, bo
   js_free(ctx, names); return valid;
 }
 
+// The URL and headers every request names; false with a TypeError thrown.
+bool read_link(JSContext* ctx, const char* call, JSValueConst url, JSValueConst options, network::Request& request, bool download) {
+  if (!text(ctx, url, request.url, 8192) ||
+      !(request.url.starts_with("http://") || request.url.starts_with("https://")) ||
+      request.url.find_first_of("\r\n") != std::string::npos) {
+    JS_ThrowTypeError(ctx, "%s: expected an http:// or https:// URL (at most 8192 bytes)", call); return false;
+  }
+  if (!headers(ctx, options, request, download)) {
+    JS_ThrowTypeError(ctx, "%s: invalid headers; transport-owned headers cannot be overridden", call); return false;
+  }
+  return true;
+}
+
+// A download's destination and options; false with a TypeError thrown.
+bool read_download(JSContext* ctx, const char* call, JSValueConst destination, JSValueConst options, network::Request& request) {
+  std::string path;
+  char resolved[PATH_MAX];
+  if (!text(ctx, destination, path, PATH_MAX-32) || path.empty() || path.back() == '/' ||
+      !host::resolve_path(path.c_str(), resolved, sizeof resolved)) {
+    JS_ThrowTypeError(ctx, "%s: destination must be an allowed absolute file path", call); return false;
+  }
+  request.destination = resolved;
+  std::string storage_root;
+  if (!string_option(ctx, options, "storageRoot", storage_root, PATH_MAX-32)) {
+    JS_ThrowTypeError(ctx, "%s %s: invalid storageRoot", call, path.c_str()); return false;
+  }
+  if (!storage_root.empty()) {
+    if (!host::resolve_path(storage_root.c_str(), resolved, sizeof resolved)) {
+      JS_ThrowTypeError(ctx, "%s %s: storageRoot must be an allowed absolute directory", call, path.c_str()); return false;
+    }
+    request.storage_root = resolved;
+    if (!request.destination.starts_with(request.storage_root + "/")) {
+      JS_ThrowTypeError(ctx, "%s %s: destination must be inside storageRoot", call, path.c_str()); return false;
+    }
+  }
+  std::uint64_t connections = request.connections;
+  if (!number_option(ctx, options, "connections", connections, 1, 64) ||
+      !number_option(ctx, options, "rangeBytes", request.range_bytes, 1024*1024, 256*1024*1024) ||
+      !boolean_option(ctx, options, "resume", request.resume) || !boolean_option(ctx, options, "adaptive", request.adaptive) ||
+      !boolean_option(ctx, options, "recoverCompleted", request.recover_completed) ||
+      !boolean_option(ctx, options, "rejectHtml", request.reject_html) ||
+      !string_option(ctx, options, "sha256", request.sha256, 64) || !digest(request.sha256, 64) ||
+      !number_option(ctx, options, "expectedBytes", request.expected_bytes, 1, 9007199254740991ULL) ||
+      !pieces(ctx, options, request) || !mirrors(ctx, options, request)) {
+    JS_ThrowTypeError(ctx, "%s %s: invalid download options; pieces must cover expectedBytes exactly without gaps or overlaps, and mirrors (at most 4 http(s) URLs) cannot be combined with pieces", call, path.c_str());
+    return false;
+  }
+  request.connections = static_cast<unsigned>(connections);
+  return true;
+}
+
 JSValue begin(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv, bool download) {
   const char* call = download ? "network.download" : "network.request";
   const int options_index = download ? 2 : 1;
   if (argc <= options_index || !JS_IsObject(argv[options_index]))
     return JS_ThrowTypeError(ctx, "%s: expected URL%s and options", call, download ? ", destination" : "");
   network::Request request;
-  if (!text(ctx, argv[0], request.url, 8192) ||
-      !(request.url.starts_with("http://") || request.url.starts_with("https://")) ||
-      request.url.find_first_of("\r\n") != std::string::npos)
-    return JS_ThrowTypeError(ctx, "%s: expected an http:// or https:// URL (at most 8192 bytes)", call);
   const JSValueConst options = argv[options_index];
-  if (!headers(ctx, options, request, download)) return JS_ThrowTypeError(ctx, "%s: invalid headers; transport-owned headers cannot be overridden", call);
+  if (!read_link(ctx, call, argv[0], options, request, download)) return JS_EXCEPTION;
   if (download) {
-    std::string path;
-    char resolved[PATH_MAX];
-    if (!text(ctx, argv[1], path, PATH_MAX-32) || path.empty() || path.back() == '/' ||
-        !host::resolve_path(path.c_str(), resolved, sizeof resolved))
-      return JS_ThrowTypeError(ctx, "%s: destination must be an allowed absolute file path", call);
-    request.destination = resolved;
-    std::string storage_root;
-    if (!string_option(ctx, options, "storageRoot", storage_root, PATH_MAX-32))
-      return JS_ThrowTypeError(ctx, "%s %s: invalid storageRoot", call, path.c_str());
-    if (!storage_root.empty()) {
-      if (!host::resolve_path(storage_root.c_str(), resolved, sizeof resolved))
-        return JS_ThrowTypeError(ctx, "%s %s: storageRoot must be an allowed absolute directory", call, path.c_str());
-      request.storage_root = resolved;
-      if (!request.destination.starts_with(request.storage_root + "/"))
-        return JS_ThrowTypeError(ctx, "%s %s: destination must be inside storageRoot", call, path.c_str());
-    }
-    std::uint64_t connections = request.connections;
-    if (!number_option(ctx, options, "connections", connections, 1, 64) ||
-        !number_option(ctx, options, "rangeBytes", request.range_bytes, 1024*1024, 256*1024*1024) ||
-        !boolean_option(ctx, options, "resume", request.resume) || !boolean_option(ctx, options, "adaptive", request.adaptive) ||
-        !boolean_option(ctx, options, "recoverCompleted", request.recover_completed) ||
-        !boolean_option(ctx, options, "rejectHtml", request.reject_html) ||
-        !string_option(ctx, options, "sha256", request.sha256, 64) || !digest(request.sha256, 64) ||
-        !number_option(ctx, options, "expectedBytes", request.expected_bytes, 1, 9007199254740991ULL) ||
-        !pieces(ctx, options, request) || !mirrors(ctx, options, request))
-      return JS_ThrowTypeError(ctx, "%s %s: invalid download options; pieces must cover expectedBytes exactly without gaps or overlaps, and mirrors (at most 4 http(s) URLs) cannot be combined with pieces", call, path.c_str());
-    request.connections = static_cast<unsigned>(connections);
+    if (!read_download(ctx, call, argv[1], options, request)) return JS_EXCEPTION;
   } else {
     if (!string_option(ctx, options, "method", request.method, 16) ||
         !string_option(ctx, options, "body", request.body, 1024*1024) ||
@@ -176,6 +198,54 @@ JSValue begin(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv, bool d
   const auto id = network::enqueue(std::move(request), error);
   if (!id) return JS_ThrowPlainError(ctx, "%s %s: %s", call, destination.c_str(), error.c_str());
   return JS_NewUint32(ctx, id);
+}
+
+// ABI v9: background({files: [{url, destination, options, task}], tasks: [{title, done, total}], status,
+// texts: {progress, complete, failed}}). true once the host's background downloader holds them, or why not.
+JSValue background(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+  constexpr const char* call = "network.background";
+  if (!argc || !JS_IsObject(argv[0])) return JS_ThrowTypeError(ctx, "%s: expected {files, tasks, status, texts}", call);
+  const JSValueConst spec = argv[0];
+  handoff::Plan plan;
+  Value tasks{ctx, JS_GetPropertyStr(ctx, spec, "tasks")}, files{ctx, JS_GetPropertyStr(ctx, spec, "files")};
+  Value texts{ctx, JS_GetPropertyStr(ctx, spec, "texts")}, status{ctx, JS_GetPropertyStr(ctx, spec, "status")};
+  std::uint64_t task_count = 0, file_count = 0;
+  if (!JS_IsArray(tasks.value) || !JS_IsArray(files.value) || !JS_IsObject(texts.value) ||
+      !number_option(ctx, tasks.value, "length", task_count, 1, 64) || !number_option(ctx, files.value, "length", file_count, 1, 256) ||
+      !string_option(ctx, texts.value, "progress", plan.progress_text, 512) ||
+      !string_option(ctx, texts.value, "complete", plan.complete_text, 512) ||
+      !string_option(ctx, texts.value, "failed", plan.failed_text, 512))
+    return JS_ThrowTypeError(ctx, "%s: expected 1 to 64 tasks, 1 to 256 files and notification texts", call);
+  std::string status_path;
+  char resolved[PATH_MAX];
+  if (!text(ctx, status.value, status_path, PATH_MAX-32) || status_path.empty() || status_path.back() == '/' ||
+      !host::resolve_path(status_path.c_str(), resolved, sizeof resolved))
+    return JS_ThrowTypeError(ctx, "%s: status must be an allowed absolute file path", call);
+  plan.status_path = resolved;
+  for (std::uint32_t i = 0; i < task_count; ++i) {
+    Value item{ctx, JS_GetPropertyUint32(ctx, tasks.value, i)};
+    handoff::Group group;
+    if (!JS_IsObject(item.value) || !string_option(ctx, item.value, "title", group.title, 512) ||
+        !number_option(ctx, item.value, "done", group.done, 0, 9007199254740991ULL) ||
+        !number_option(ctx, item.value, "total", group.total, 0, 9007199254740991ULL))
+      return JS_ThrowTypeError(ctx, "%s: task %u needs a title and byte counts", call, i);
+    plan.groups.push_back(std::move(group));
+  }
+  for (std::uint32_t i = 0; i < file_count; ++i) {
+    Value item{ctx, JS_GetPropertyUint32(ctx, files.value, i)};
+    Value url{ctx, JS_GetPropertyStr(ctx, item.value, "url")}, destination{ctx, JS_GetPropertyStr(ctx, item.value, "destination")};
+    Value options{ctx, JS_GetPropertyStr(ctx, item.value, "options")};
+    handoff::Entry entry;
+    std::uint64_t task = 0;
+    if (!JS_IsObject(item.value) || !JS_IsObject(options.value) || !number_option(ctx, item.value, "task", task, 0, task_count - 1))
+      return JS_ThrowTypeError(ctx, "%s: file %u needs url, destination, options and a task index", call, i);
+    entry.group = static_cast<std::uint32_t>(task);
+    if (!read_link(ctx, call, url.value, options.value, entry.request, true) ||
+        !read_download(ctx, call, destination.value, options.value, entry.request)) return JS_EXCEPTION;
+    plan.entries.push_back(std::move(entry));
+  }
+  char error[512] = "";
+  return host::start_background(plan, error, sizeof error) ? JS_TRUE : JS_NewString(ctx, error);
 }
 
 JSValue download(JSContext* ctx, JSValueConst self, int argc, JSValueConst* argv) { return begin(ctx, self, argc, argv, true); }
@@ -213,7 +283,7 @@ JSValue info(JSContext* ctx, JSValueConst, int, JSValueConst*) { return JS_NewSt
 
 JSValue ps5_react_network_api(JSContext* ctx) {
   JSValue out = JS_NewObject(ctx);
-  for (const auto& item : {std::pair<const char*, JSCFunction*>{"download", &download}, {"request", &request}, {"cancel", &cancel}, {"poll", &poll}, {"version", &info}})
+  for (const auto& item : {std::pair<const char*, JSCFunction*>{"download", &download}, {"request", &request}, {"cancel", &cancel}, {"poll", &poll}, {"version", &info}, {"background", &background}})
     JS_SetPropertyStr(ctx, out, item.first, JS_NewCFunction(ctx, item.second, item.first, 0));
   return out;
 }

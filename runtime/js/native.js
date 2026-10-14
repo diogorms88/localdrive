@@ -345,6 +345,27 @@ export const Downloads = {
   enqueueManifest({manifest, destination, ...options}) {
     return Downloads.enqueue({...options, ...normalizeDownloadManifest(manifest), destination});
   },
+  /**
+   * Hands downloads to a downloader that carries them on after the app closes (PS5 only: it needs the
+   * payload loader). Stop this app's own tasks for those files first, and close the app once this
+   * returns true: the downloader starts when the app has closed and stops when it opens again, leaving
+   * each file where `enqueue` with the same options resumes or recovers it. It reports to `status`
+   * (see docs/NETWORKING.md) and shows a toast at each quarter of a task and when it ends.
+   * @param {{files: {url?: string, destination: string, task: number, [option: string]: unknown}[],
+   *   tasks: {title: string, done?: number, total?: number}[], status: string,
+   *   texts: {progress: string, complete: string, failed: string}}} handoff
+   *   files take `enqueue`'s options; `task` indexes `tasks`. Texts may name {title} and {percent}.
+   * @returns {true | string} true, or the reason it cannot
+   */
+  background({files, tasks, status, texts}) {
+    return host().network.background({
+      files: files.map(({url, destination, task, ...options}) => ({
+        url: url ?? options.pieces?.[0]?.url, destination, task, options,
+      })),
+      tasks: tasks.map(({title, done = 0, total = 0}) => ({title: String(title).replace(/[\r\n]+/g, ' '), done, total})),
+      status, texts,
+    });
+  },
   get transportVersion() { return host().network.version(); },
 };
 

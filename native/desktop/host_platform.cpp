@@ -68,6 +68,12 @@ bool arrange_relaunch(char*, std::size_t) {
   return true;
 }
 
+// The preview's downloads end with it; only the console has a downloader that outlives the app.
+bool start_background(handoff::Plan&, char* error, std::size_t size) {
+  std::snprintf(error, size, "background downloads: only the PS5 can keep downloading after the app closes");
+  return false;
+}
+
 int list_mounts(MountEntry* mounts, int max) {
   struct statfs* found = nullptr;
   const int count = getmntinfo(&found, MNT_NOWAIT);
