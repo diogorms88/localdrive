@@ -25,6 +25,7 @@
 //                                  the order asked; a path already gone counts as removed
 //   removals.poll()                [{id, state, error}]; error is the system error; consumes terminal
 //   fs.rename(from, to)
+//   fs.copyFile(from, to)          ABI v9; byte copy of a regular file of at most kMaxReadBytes, replacing `to`
 //   fs.chmod(path, mode)           sets permission bits
 //   fs.mounts()                    [{device, path, type}], visible to the process
 //                                  console access is opt-in via app.json
@@ -66,8 +67,8 @@
 //   network.background({files, tasks, status, texts}) ABI v9; hands downloads to a downloader that outlives
 //                                  the app: files [{url, destination, options, task}] as network.download
 //                                  takes them, tasks [{title, done, total}] they belong to, status a file
-//                                  it reports to, texts {progress, complete, failed} for its toasts
-//                                  ({title}, {percent}); true once it holds them, or the reason it cannot
+//                                  it reports to, texts {progress, complete, failed, started} for its
+//                                  toasts ({title}, {percent}; started: {count}); true once it holds them, or the reason it cannot
 //                                  (PS5: needs the payload loader on 127.0.0.1:9021; desktop: unsupported)
 //   image.load(url, width, height, fit, prefetch) {id, state, name, width, height, error, color}; takes a
 //                                  reference; fit: 0 cover, 1 contain, 2 stretch, 3 none; prefetch

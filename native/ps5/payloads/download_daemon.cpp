@@ -13,10 +13,12 @@
 // app runs again, and reports in the plan's status file:
 //   LDS1 <waiting|running|stopped|finished> <unix seconds>
 //   <file index> <state> <written> <total or -> <bytes per second> <error>
-// Toasts say how far each task got, at every quarter, and how it ended.
+// Toasts say that it took over, how far each task got at every quarter, and how it ended.
 #include "download_handoff.hpp"
 #include "network.hpp"
 #include <algorithm>
+#include <arpa/inet.h>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -25,9 +27,15 @@
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
+#include <iterator>
 #include <mutex>
+#include <netinet/in.h>
+#include <initializer_list>
 #include <string>
+#include <string_view>
 #include <sys/file.h>
+#include <sys/select.h>
+#include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -48,6 +56,17 @@ extern "C" int sceKernelSendNotificationRequest(int device, NotifyRequest* reque
 constexpr unsigned parallel = 3;
 constexpr auto tick = std::chrono::milliseconds(250);
 constexpr int close_timeout_s = 60, settle_ms = 500, stop_timeout_s = 20;
+// A file that fails is tried again this many times in all, this long apart: a host that allows one
+// connection per IP (CDRomance) can still count the app's connection right after the app closed.
+constexpr unsigned max_attempts = 3;
+constexpr auto retry_delay = std::chrono::seconds(20);
+
+// Failures another attempt cannot fix: the files on disk or the drive are the problem.
+bool retriable(const std::string& error) {
+  for (const char* lasting : {"partial file", "checkpoint", "space", "exists", "expectedBytes", "changed", "storage"})
+    if (error.find(lasting) != std::string::npos) return false;
+  return true;
+}
 
 std::mutex log_mutex;
 FILE* log_file = nullptr;
@@ -85,8 +104,8 @@ bool read_request(std::string& text) {
 
 bool app_running(const std::string& title) { return sceLncUtilGetAppId(title.c_str()) >= 0; }
 
-std::string fill(std::string text, const std::string& title, int percent) {
-  for (const auto& [key, value] : {std::pair<std::string, std::string>{"{title}", title}, {"{percent}", std::to_string(percent)}})
+std::string fill(std::string text, std::initializer_list<std::pair<std::string_view, std::string>> values) {
+  for (const auto& [key, value] : values)
     for (auto at = text.find(key); at != std::string::npos; at = text.find(key, at + value.size()))
       text.replace(at, key.size(), value);
   return text;
@@ -105,10 +124,122 @@ struct File {
   std::uint64_t written = 0, total = 0;
   bool total_known = false, finished = false;
   double bytes_per_second = 0;
+  unsigned attempts = 0;
+  std::chrono::steady_clock::time_point retry_at{};
 };
 struct Task {
   int quarter = 0;
   bool told = false;
+};
+// A task's files summed up: what its toasts and its row on the progress page say.
+struct Measure {
+  std::uint64_t written = 0, total = 0;
+  double bytes_per_second = 0;
+  bool ended = true, failed = false;
+  std::string reason, state;
+};
+
+std::string escape(const std::string& text) {
+  std::string out;
+  for (const char c : text) {
+    switch (c) {
+      case '&': out += "&amp;"; break;
+      case '<': out += "&lt;"; break;
+      case '>': out += "&gt;"; break;
+      case '"': out += "&quot;"; break;
+      default: out += c;
+    }
+  }
+  return out;
+}
+
+std::string format_speed(double bytes_per_second) {
+  char text[32];
+  std::snprintf(text, sizeof text, "%.1f MB/s", bytes_per_second / (1024 * 1024));
+  return text;
+}
+
+std::string format_time(std::uint64_t seconds) {
+  char text[32];
+  if (seconds >= 3600) std::snprintf(text, sizeof text, "%lluh %02llum", static_cast<unsigned long long>(seconds / 3600),
+                                     static_cast<unsigned long long>(seconds % 3600 / 60));
+  else if (seconds >= 60) std::snprintf(text, sizeof text, "%llu min", static_cast<unsigned long long>(seconds / 60));
+  else std::snprintf(text, sizeof text, "%llu s", static_cast<unsigned long long>(seconds));
+  return text;
+}
+
+// The progress page on 127.0.0.1, for the home-screen shortcut whose system web view opens over a
+// game. Serves the latest page to every request; one connection at a time, each bounded in time.
+class PageServer {
+public:
+  bool start(std::uint16_t port) {
+    listener_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (listener_ < 0) { log("page: socket: %s", std::strerror(errno)); return false; }
+    const int enabled = 1;
+    setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof enabled);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(listener_, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0 || listen(listener_, 4) != 0) {
+      log("page: port %u: %s", static_cast<unsigned>(port), std::strerror(errno));
+      close(listener_); listener_ = -1;
+      return false;
+    }
+    thread_ = std::thread([this] { serve(); });
+    log("page: http://127.0.0.1:%u/", static_cast<unsigned>(port));
+    return true;
+  }
+  void stop() {
+    running_ = false;
+    if (thread_.joinable()) thread_.join();
+    if (listener_ >= 0) close(listener_);
+    listener_ = -1;
+  }
+  void publish(std::string page) {
+    std::lock_guard lock(mutex_);
+    page_ = std::move(page);
+  }
+
+private:
+  void serve() {
+    while (running_) {
+      fd_set ready;
+      FD_ZERO(&ready);
+      FD_SET(listener_, &ready);
+      timeval wait{0, 500 * 1000};
+      if (select(listener_ + 1, &ready, nullptr, nullptr, &wait) <= 0) continue;
+      const int client = accept(listener_, nullptr, nullptr);
+      if (client < 0) continue;
+      const timeval timeout{2, 0};
+      setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+      setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
+      std::string request;
+      char buffer[1024];
+      for (ssize_t count; request.find("\r\n\r\n") == std::string::npos && request.size() < 8192 &&
+                          (count = recv(client, buffer, sizeof buffer, 0)) > 0;)
+        request.append(buffer, static_cast<std::size_t>(count));
+      std::string body;
+      { std::lock_guard lock(mutex_); body = page_; }
+      const bool page = request.starts_with("GET / ") || request.starts_with("GET /?");
+      std::string response = page ? "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                                  : "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n";
+      if (!page) body = "not found";
+      response += "Cache-Control: no-store\r\nConnection: close\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+      for (std::size_t sent = 0; sent < response.size();) {
+        const ssize_t count = send(client, response.data() + sent, response.size() - sent, 0);
+        if (count <= 0) break;
+        sent += static_cast<std::size_t>(count);
+      }
+      close(client);
+    }
+  }
+
+  int listener_ = -1;
+  std::atomic<bool> running_{true};
+  std::thread thread_;
+  std::mutex mutex_;
+  std::string page_;
 };
 
 class Daemon {
@@ -150,43 +281,55 @@ public:
       return "stopped";
     }
     report("running");
-    std::size_t next = 0;
+    const bool page = plan_.page_port && server_.start(plan_.page_port);
+    if (page) server_.publish(render(false));
+    // The app closed before it could show anything: this says the handoff worked.
+    if (!plan_.started_text.empty()) notify(fill(plan_.started_text, {{"{count}", std::to_string(plan_.groups.size())}}));
     unsigned active = 0;
     auto last_report = std::chrono::steady_clock::now(), last_check = last_report;
     bool stopping = false;
     auto stop_deadline = last_report;
     for (;;) {
-      while (!stopping && active < parallel && next < files_.size()) {
-        File& f = files_[next];
-        f.task = network::enqueue(plan_.entries[next].request, error);
+      auto now = std::chrono::steady_clock::now();
+      // In order; a file waiting to be tried again does not hold back the ones after it.
+      for (std::size_t i = 0; !stopping && active < parallel && i < files_.size(); ++i) {
+        File& f = files_[i];
+        if (f.finished || f.task || now < f.retry_at) continue;
+        ++f.attempts;
+        f.task = network::enqueue(plan_.entries[i].request, error);
         if (f.task) { f.state = "connecting"; ++active; }
         else { f.state = "failed"; f.error = error; f.finished = true; }
-        log("file %zu %s: %s", next, plan_.entries[next].request.destination.c_str(), f.task ? "started" : error.c_str());
-        ++next;
+        log("file %zu %s: %s (attempt %u)", i, plan_.entries[i].request.destination.c_str(), f.task ? "started" : error.c_str(), f.attempts);
       }
       for (const auto& s : network::poll()) {
-        const auto it = std::find_if(files_.begin(), files_.end(), [&](const File& f) { return f.task == s.id && !f.finished; });
+        const auto it = std::find_if(files_.begin(), files_.end(), [&](const File& f) { return f.task && f.task == s.id && !f.finished; });
         if (it == files_.end()) continue;
         it->state = s.state; it->error = s.error; it->written = s.written; it->total = s.total;
         it->total_known = s.total_known; it->bytes_per_second = s.bytes_per_second;
         if (s.state == "completed" || s.state == "failed" || s.state == "cancelled") {
-          it->finished = true; it->bytes_per_second = 0; --active;
-          log("file %zu %s %s", static_cast<std::size_t>(it - files_.begin()), s.state.c_str(), s.error.c_str());
+          const auto index = static_cast<std::size_t>(it - files_.begin());
+          log("file %zu %s %s", index, s.state.c_str(), s.error.c_str());
+          it->bytes_per_second = 0; it->task = 0; --active;
+          if (s.state == "failed" && !stopping && it->attempts < max_attempts && retriable(s.error)) {
+            it->state = "retrying"; it->retry_at = now + retry_delay;
+            log("file %zu: trying again in %lld s", index, static_cast<long long>(retry_delay.count()));
+          } else it->finished = true;
         }
       }
       if (!stopping) announce();
-      const auto now = std::chrono::steady_clock::now();
+      if (page) server_.publish(render(stopping));
+      now = std::chrono::steady_clock::now();
       if (!stopping && now - last_check >= std::chrono::seconds(1)) {
         last_check = now;
         if (app_running(plan_.title_id)) {
           // The app takes its downloads back: each stops at its last checkpoint.
           log("app opened again; handing the downloads back");
           stopping = true; stop_deadline = now + std::chrono::seconds(stop_timeout_s);
-          for (const File& f : files_) if (f.task && !f.finished) network::cancel(f.task);
+          for (const File& f : files_) if (f.task) network::cancel(f.task);
         }
       }
       if (now - last_report >= std::chrono::seconds(2)) { last_report = now; report("running"); }
-      if (active == 0 && (stopping || next == files_.size())) break;
+      if (active == 0 && (stopping || std::all_of(files_.begin(), files_.end(), [](const File& f) { return f.finished; }))) break;
       if (stopping && now >= stop_deadline) { log("downloads did not stop in time"); break; }
       std::this_thread::sleep_for(tick);
     }
@@ -195,6 +338,7 @@ public:
       f.bytes_per_second = 0;
       if (!f.finished && f.state != "queued") f.state = "cancelled";
     }
+    if (page) server_.stop();
     give_back();
     return stopping ? "stopped" : "finished";
   }
@@ -212,43 +356,96 @@ public:
   }
 
 private:
+  Measure measure(std::size_t g) const {
+    const auto& group = plan_.groups[g];
+    Measure m;
+    m.written = group.done;
+    std::uint64_t total = 0;
+    bool sized = true;
+    // The state the task shows: the furthest along of its files still at work.
+    static constexpr const char* order[] = {"downloading", "verifying", "connecting", "retrying", "queued"};
+    std::size_t rank = std::size(order);
+    for (std::size_t i = 0; i < files_.size(); ++i) {
+      if (plan_.entries[i].group != g) continue;
+      const File& f = files_[i];
+      m.written += f.finished && f.state == "completed" ? std::max(f.total, f.written) : f.written;
+      if (f.total_known) total += f.total;
+      else if (plan_.entries[i].request.expected_bytes) total += plan_.entries[i].request.expected_bytes;
+      else sized = false;
+      m.bytes_per_second += f.bytes_per_second;
+      m.ended = m.ended && f.finished;
+      if (f.finished && f.state != "completed") { m.failed = true; if (m.reason.empty()) m.reason = f.error; }
+      for (std::size_t r = 0; r < rank; ++r) if (f.state == order[r]) rank = r;
+    }
+    m.total = group.total ? group.total : (sized ? total + group.done : 0);
+    m.state = m.ended ? (m.failed ? "failed" : "completed") : rank < std::size(order) ? order[rank] : "cancelled";
+    return m;
+  }
+
   // A toast at each quarter of a task, and once when all its files ended.
   void announce() {
     for (std::size_t g = 0; g < tasks_.size(); ++g) {
       const auto& group = plan_.groups[g];
       Task& task = tasks_[g];
       if (task.told) continue;
-      std::uint64_t written = group.done, total = 0;
-      bool ended = true, failed = false, sized = true;
-      std::string reason;
-      for (std::size_t i = 0; i < files_.size(); ++i) {
-        if (plan_.entries[i].group != g) continue;
-        const File& f = files_[i];
-        written += f.finished && f.state == "completed" ? std::max(f.total, f.written) : f.written;
-        if (f.total_known) total += f.total;
-        else if (plan_.entries[i].request.expected_bytes) total += plan_.entries[i].request.expected_bytes;
-        else sized = false;
-        ended = ended && f.finished;
-        if (f.finished && f.state != "completed") { failed = true; if (reason.empty()) reason = f.error; }
-      }
-      if (ended) {
+      const Measure m = measure(g);
+      if (m.ended) {
         task.told = true;
-        notify(fill(failed ? plan_.failed_text : plan_.complete_text, group.title, 100) + (failed && !reason.empty() ? "\n" + reason : ""));
+        notify(fill(m.failed ? plan_.failed_text : plan_.complete_text, {{"{title}", group.title}}) +
+               (m.failed && !m.reason.empty() ? "\n" + m.reason : ""));
         continue;
       }
-      total = group.total ? group.total : (sized ? total + group.done : 0);
-      if (!total) continue;
-      const int quarter = static_cast<int>(std::min<std::uint64_t>(3, written * 4 / total));
+      if (!m.total) continue;
+      const int quarter = static_cast<int>(std::min<std::uint64_t>(3, m.written * 4 / m.total));
       if (quarter > task.quarter) {
         task.quarter = quarter;
-        notify(fill(plan_.progress_text, group.title, quarter * 25));
+        notify(fill(plan_.progress_text, {{"{title}", group.title}, {"{percent}", std::to_string(quarter * 25)}}));
       }
     }
+  }
+
+  std::string text(const char* key, const char* fallback) const {
+    for (const auto& [name, value] : plan_.page_texts) if (name == key) return value;
+    return fallback;
+  }
+
+  // The progress page: every task with its share done, state, speed and time left. It reloads itself.
+  std::string render(bool stopping) const {
+    const std::string heading = escape(text("heading", "LocalDrive downloads"));
+    std::string html =
+      "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"2\">"
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + heading + "</title><style>"
+      "body{margin:0;padding:48px 64px;background:#0d0d0f;color:#f2f2f3;font-family:sans-serif}"
+      "h1{font-size:40px;font-weight:600;margin:0 0 36px}"
+      ".task{background:#17171a;border-radius:16px;padding:24px 28px;margin-bottom:20px}"
+      ".row{display:flex;justify-content:space-between;gap:24px;font-size:28px}"
+      ".title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+      ".bar{height:12px;background:#2a2a2f;border-radius:6px;margin:16px 0 12px;overflow:hidden}"
+      ".fill{height:100%;background:#f2f2f3;border-radius:6px}.failed .fill{background:#e5484d}"
+      ".detail{font-size:22px;color:#a3a3ab}</style></head><body><h1>" + heading + "</h1>";
+    for (std::size_t g = 0; g < plan_.groups.size(); ++g) {
+      const Measure m = measure(g);
+      const int percent = m.state == "completed" ? 100 : m.total ? static_cast<int>(std::min<std::uint64_t>(100, m.written * 100 / m.total)) : 0;
+      const std::string state = stopping && !m.ended ? "cancelled" : m.state;
+      std::string detail = escape(text(state.c_str(), state.c_str()));
+      if (state == "downloading" && m.bytes_per_second > 0) {
+        detail += " &middot; " + format_speed(m.bytes_per_second);
+        if (m.total > m.written)
+          detail += " &middot; " + escape(fill(text("left", "{time} left"), {{"{time}", format_time(static_cast<std::uint64_t>((m.total - m.written) / m.bytes_per_second))}}));
+      }
+      if (m.failed && !m.reason.empty()) detail += " &middot; " + escape(m.reason);
+      html += "<div class=\"task" + std::string(m.failed ? " failed" : "") + "\"><div class=\"row\"><span class=\"title\">" +
+              escape(plan_.groups[g].title) + "</span><span>" + (m.total || m.ended ? std::to_string(percent) + "%" : "") +
+              "</span></div><div class=\"bar\"><div class=\"fill\" style=\"width:" + std::to_string(percent) +
+              "%\"></div></div><div class=\"detail\">" + detail + "</div></div>";
+    }
+    return html + "</body></html>";
   }
 
   handoff::Plan plan_;
   std::vector<File> files_;
   std::vector<Task> tasks_;
+  PageServer server_;
 };
 } // namespace
 

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The downloads an app hands to download-daemon.elf (native/ps5/payloads/download_daemon.cpp), which
@@ -28,8 +29,14 @@ struct Plan {
   long long owner_uid = -1, owner_gid = -1;
   // Where the daemon reports, rewritten in place (see download_daemon.cpp for its format).
   std::string status_path;
-  // Notification texts in the app's language; "{title}" and "{percent}" are replaced.
-  std::string progress_text, complete_text, failed_text;
+  // Notification texts in the app's language; "{title}" and "{percent}" are replaced. The started text,
+  // shown once the daemon has taken over, may name the number of tasks as "{count}".
+  std::string progress_text, complete_text, failed_text, started_text;
+  // A progress page the daemon serves on 127.0.0.1:<page_port> while it runs (0: none), with its texts
+  // in the app's language by key (heading, queued, connecting, downloading, verifying, retrying,
+  // completed, failed, cancelled, left: "{time}" is replaced).
+  std::uint16_t page_port = 0;
+  std::vector<std::pair<std::string, std::string>> page_texts;
   std::vector<Group> groups;
   std::vector<Entry> entries;
 };

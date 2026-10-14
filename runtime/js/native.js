@@ -84,6 +84,9 @@ export const FileSystem = {
   removeAsync: async path => { await networkTask(host().fs.removeAsync(path), 'fs.removeAsync', path, 'removals').done; },
   /** @param {string} from @param {string} to */
   rename: (from, to) => host().fs.rename(from, to),
+  /** Copies a file of at most 8 MiB byte for byte, replacing `to`: binary files such as an icon,
+   * which readFile/writeFile cannot carry as text. @param {string} from @param {string} to */
+  copyFile: (from, to) => host().fs.copyFile(from, to),
   /** Sets a file's or directory's permission bits, such as 0o777. */
   chmod: (path, mode) => host().fs.chmod(path, mode),
   /** Mounted filesystems visible to the host process. Console access requires
@@ -353,17 +356,21 @@ export const Downloads = {
    * (see docs/NETWORKING.md) and shows a toast at each quarter of a task and when it ends.
    * @param {{files: {url?: string, destination: string, task: number, [option: string]: unknown}[],
    *   tasks: {title: string, done?: number, total?: number}[], status: string,
-   *   texts: {progress: string, complete: string, failed: string}}} handoff
-   *   files take `enqueue`'s options; `task` indexes `tasks`. Texts may name {title} and {percent}.
+   *   texts: {progress: string, complete: string, failed: string, started?: string}}} handoff
+   *   files take `enqueue`'s options; `task` indexes `tasks`. Texts may name {title} and {percent};
+   *   `started`, shown once the downloader has taken over, may name the number of tasks as {count}.
+   *   `page: {port, texts}` (optional) has it serve a progress page on 127.0.0.1:port while it runs;
+   *   texts by state (queued, connecting, downloading, verifying, retrying, completed, failed,
+   *   cancelled), plus heading and left ({time}).
    * @returns {true | string} true, or the reason it cannot
    */
-  background({files, tasks, status, texts}) {
+  background({files, tasks, status, texts, page}) {
     return host().network.background({
       files: files.map(({url, destination, task, ...options}) => ({
         url: url ?? options.pieces?.[0]?.url, destination, task, options,
       })),
       tasks: tasks.map(({title, done = 0, total = 0}) => ({title: String(title).replace(/[\r\n]+/g, ' '), done, total})),
-      status, texts,
+      status, texts, page,
     });
   },
   get transportVersion() { return host().network.version(); },

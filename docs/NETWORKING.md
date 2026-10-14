@@ -145,7 +145,8 @@ const result = Downloads.background({
   files: [{url, destination, storageRoot: '/data', expectedBytes, recoverCompleted: true, task: 0}],
   tasks: [{title: 'Game', done: 0, total: expectedBytes}],
   status: '/data/my-app/background-status',
-  texts: {progress: '{title}: {percent}%', complete: '{title} downloaded', failed: '{title} stopped'},
+  texts: {progress: '{title}: {percent}%', complete: '{title} downloaded', failed: '{title} stopped',
+          started: '{count} downloads continue in the background'},
 });
 if (result === true) BackHandler.exitApp();
 ```
@@ -155,13 +156,30 @@ if (result === true) BackHandler.exitApp();
   what the app already finished of the task, `total` its whole size (0 when
   unknown).
 - **Lifecycle.** The call returns `true` once the daemon holds the plan, or the
-  reason it cannot (no loader; an earlier daemon still running). The daemon starts
-  only after the app has closed, and gives up after 60 s if it does not. It runs
-  three files at a time and stops (each file at its last checkpoint) as soon as the
+  reason it cannot (no loader; an earlier daemon still running). A daemon that
+  takes longer to load than the host waits for its answer still writes its first
+  report (`waiting`) before answering: an app that sees that report can treat the
+  handoff as done. The daemon starts only after the app has closed, and gives up
+  after 60 s if it does not. It runs three files at a time, tries a failed file
+  again up to twice, 20 s apart (a host that allows one connection per IP may still
+  count the app's), unless the failure lies with the files or the drive, and stops (each file at its last checkpoint) as soon as the
   app runs again; the app then enqueues the same files, and those the daemon
   finished recover from their completion receipts without the network.
-- **Notifications.** A system toast at each quarter of a task and when it ends;
-  `texts` may name `{title}` and `{percent}`.
+- **Notifications.** A system toast once the daemon has taken over (`started`,
+  which may name `{count}` tasks), at each quarter of a task and when it ends;
+  the other `texts` may name `{title}` and `{percent}`.
+- **Progress page.** With `page: {port, texts}` the daemon serves a progress
+  page on `127.0.0.1:<port>` (loopback only) while it runs: each task's share
+  done, state, speed and time left, reloading every 2 seconds. `texts` names the
+  states (`queued`, `connecting`, `downloading`, `verifying`, `retrying`,
+  `completed`, `failed`, `cancelled`), the `heading` and `left` (`{time}`). A
+  home-screen shortcut whose `param.json` declares a web-shell app
+  (`applicationCategoryType` 66048) with that `deeplinkUri` opens it in a system
+  web view; LocalDrive lays such a folder out and leaves its registration to
+  ShadowMountPlus. Whether the view opens over a running game is not yet
+  verified for this shortcut.
+- **Whole-file servers.** A partial file without a checkpoint (a server without
+  range support) cannot resume anywhere; hand that file over from zero.
 - **Status.** The daemon rewrites `status` every 2 seconds (and `status.log` with
   its log):
 

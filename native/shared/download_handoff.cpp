@@ -48,6 +48,12 @@ bool encode(const Plan& plan, std::string& out, std::string& error) {
   w.line("progress-text", plan.progress_text);
   w.line("complete-text", plan.complete_text);
   w.line("failed-text", plan.failed_text);
+  w.line("started-text", plan.started_text);
+  if (plan.page_port) w.number("page-port", plan.page_port);
+  for (const auto& [key, text] : plan.page_texts) {
+    if (key.empty() || key.find(' ') != std::string::npos) { error = "a page text key holds a space"; return false; }
+    w.line("page-text", key + " " + text);
+  }
   for (const auto& group : plan.groups) {
     w.line("group", std::to_string(group.done) + " " + std::to_string(group.total) + " " + group.title);
   }
@@ -137,6 +143,16 @@ bool decode(std::string_view text, Plan& plan, std::string& error) {
     else if (key == "progress-text") plan.progress_text = value;
     else if (key == "complete-text") plan.complete_text = value;
     else if (key == "failed-text") plan.failed_text = value;
+    else if (key == "started-text") plan.started_text = value;
+    else if (key == "page-port") {
+      ok = number(line, n) && n > 0 && n < 65536;
+      plan.page_port = static_cast<std::uint16_t>(n);
+    }
+    else if (key == "page-text") {
+      const auto name = word(line);
+      ok = !name.empty() && plan.page_texts.size() < 32;
+      if (ok) plan.page_texts.emplace_back(std::string(name), std::string(line));
+    }
     else if (key == "go") finished = true;
     else ok = false;
     if (!ok) { error = "unreadable line: " + std::string(key); return false; }

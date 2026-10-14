@@ -19,6 +19,7 @@ import {useInterfaceHaptics} from './ui/haptics.js';
 import {Header} from './ui/Header.jsx';
 import {Splash} from './ui/Splash.jsx';
 import {UpdateDialog} from './ui/UpdateDialog.jsx';
+import {ensureProgressShortcut} from './state/progress-page.js';
 
 function Screen({screen: screen}) {
   const {openGame, pop, push} = useNavActions();
@@ -65,6 +66,9 @@ function App() {
   useEffect(() => {
     const id = setTimeout(warmCovers, WARM_DELAY_MS);
     return () => clearTimeout(id);
+  }, []);
+  useEffect(() => {
+    void ensureProgressShortcut();
   }, []);
   const {top} = useNavState();
   const onBrowse = top.name === 'browse';

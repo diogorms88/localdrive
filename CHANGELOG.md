@@ -1,5 +1,26 @@
 # Changelog
 
+## LocalDrive v0.0.22
+
+- A “LocalDrive Downloads” shortcut for following background downloads during a game: while they run,
+  the background downloader serves a progress page inside the console (each game's percentage, state,
+  speed and time left, updated every 2 seconds). On launch, LocalDrive lays the shortcut out in
+  `/data/homebrew/FAKE99059` as a web app pointing at that page, like ShadowMountPlus's own launcher,
+  and asks ShadowMountPlus to scan so it registers it on the home screen. Not yet tested on a PS5:
+  whether ShadowMountPlus registers it and whether it opens over a game without closing it.
+
+## LocalDrive v0.0.21
+
+- “Download in background” no longer reports “download-daemon.elf did not answer” when the background
+  downloader simply took longer to start than LocalDrive waited: LocalDrive now checks for its first
+  report, and closes itself once it is there. A console notification (“background downloads on”)
+  confirms the downloader took over.
+- For PS2 games, which did not continue in the background: the background downloader tries a file
+  that fails at the start again up to twice, 20 seconds apart, since CDRomance allows one connection
+  per IP and can still count LocalDrive's own right after it closed. A partial file from a server that
+  only sends whole files, which nothing can resume, starts again in the background instead of failing.
+  Not yet tested on a PS5.
+
 ## LocalDrive v0.0.20
 
 - Downloads can continue in the background while you play: “Download in background” on the Downloads

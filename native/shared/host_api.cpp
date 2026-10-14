@@ -252,6 +252,40 @@ JSValue fs_rename(JSContext* ctx, JSValueConst, int, JSValueConst* argv) {
   return JS_ThrowPlainError(ctx, "fs.rename %s -> %s: %s", from.app(), to.app(), std::strerror(errno));
 }
 
+// ABI v9: copies a small file byte for byte (an icon, which readFile/writeFile cannot carry as text),
+// replacing `to`. At most kMaxReadBytes, so it stays cheap on the render thread.
+JSValue fs_copy_file(JSContext* ctx, JSValueConst, int, JSValueConst* argv) {
+  Path from(ctx, argv[0]);
+  if (!from) return from.error("fs.copyFile");
+  Path to(ctx, argv[1]);
+  if (!to) return to.error("fs.copyFile");
+  const int source = open(from.real(), O_RDONLY);
+  if (source < 0) return from.error("fs.copyFile");
+  struct stat st;
+  if (fstat(source, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size > static_cast<off_t>(kMaxReadBytes)) {
+    close(source);
+    return JS_ThrowPlainError(ctx, "fs.copyFile %s: not a regular file of at most %zu bytes", from.app(), kMaxReadBytes);
+  }
+  const int target = open(to.real(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (target < 0) { close(source); return to.error("fs.copyFile"); }
+  char buffer[64 * 1024];
+  bool ok = true;
+  for (ssize_t count; ok && (count = read(source, buffer, sizeof buffer)) != 0;) {
+    if (count < 0) { ok = errno == EINTR; continue; }
+    for (ssize_t written = 0; ok && written < count;) {
+      const ssize_t n = write(target, buffer + written, static_cast<std::size_t>(count - written));
+      ok = n > 0 || (n < 0 && errno == EINTR);
+      if (n > 0) written += n;
+    }
+  }
+  const int saved = errno;
+  close(source);
+  if (close(target) != 0) ok = false;
+  if (ok) return JS_UNDEFINED;
+  errno = saved;
+  return JS_ThrowPlainError(ctx, "fs.copyFile %s -> %s: %s", from.app(), to.app(), std::strerror(errno));
+}
+
 JSValue fs_chmod(JSContext* ctx, JSValueConst, int, JSValueConst* argv) {
   Path path(ctx, argv[0]);
   if (!path) return path.error("fs.chmod");
@@ -466,7 +500,7 @@ constexpr Function kFs[] = {
   {"readDir", fs_read_dir, 1}, {"stat", fs_stat, 1}, {"readFile", fs_read_file, 1},
   {"writeFile", fs_write_file, 4}, {"mkdir", fs_mkdir, 2}, {"remove", fs_remove, 1},
   {"removeTree", fs_remove_tree, 1}, {"removeAsync", fs_remove_async, 1},
-  {"rename", fs_rename, 2}, {"chmod", fs_chmod, 2}, {"mounts", fs_mounts, 0}, {"diskUsage", fs_disk_usage, 1},
+  {"rename", fs_rename, 2}, {"copyFile", fs_copy_file, 2}, {"chmod", fs_chmod, 2}, {"mounts", fs_mounts, 0}, {"diskUsage", fs_disk_usage, 1},
 };
 constexpr Function kRemovals[] = {{"poll", removals_poll, 0}};
 constexpr Function kDevice[] = {{"info", device_info, 0}};

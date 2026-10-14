@@ -5,6 +5,7 @@ import {createSourceResolver, sourceKind, cancellation, webURL, BrowserRequired}
 import {describeVikingCapture, VIKING_PREFIX, validateVikingCapture} from './viking-capture.js';
 import {stillNeeded, MARGIN, spaceShortfall} from './space.js';
 import {cause, STALE_PARTIAL} from '../downloads/errors.js';
+import {PAGE_PORT, pageTexts} from './progress-page.js';
 
 const ACTIVE = ['resolving', 'connecting', 'downloading', 'verifying', 'extracting', 'installing', 'pausing'];
 
@@ -994,6 +995,25 @@ export function createDownloadQueue({
     }
     for (const path of paths) if (fs.exists(path)) fs.remove(path);
   }
+  // A partial file without a checkpoint came from a server that sends files only whole: nothing can
+  // continue it, so a task handed to the background downloader starts that file again instead.
+  function dropUnresumable(job, destination) {
+    if (job.adopted || fs.exists(destination) || !fs.exists(`${destination}.part`) || fs.exists(`${destination}.resume`))
+      return false;
+    for (const suffix of ['.part', '.complete', '.complete.tmp'])
+      if (fs.exists(destination + suffix)) fs.remove(destination + suffix);
+    console.log(`[download-queue] ${job.title}: its partial file cannot resume; the background downloader starts it again`);
+    return true;
+  }
+  // Waits for the background downloader's first report, which it writes before it answers: a slow
+  // start can outlast the host's wait for that answer although the downloader holds the plan.
+  async function daemonReported(ms) {
+    for (const end = Date.now() + ms; Date.now() < end; ) {
+      if (readBackground()) return true;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    return Boolean(readBackground());
+  }
   const onOriginalStorage = job => {
     try {
       storageIdentity(job);
@@ -1459,6 +1479,7 @@ export function createDownloadQueue({
             for (let index = 0; index < job.parts.length; index++) {
               const part = job.parts[index];
               if (part.completed && fs.exists(part.destination)) continue;
+              if (dropUnresumable(job, part.destination)) part.written = 0;
               if (!part.options) await resolvePart(job, index, signal);
               mine.push({file: files.length + mine.length, part: index});
             }
@@ -1472,6 +1493,7 @@ export function createDownloadQueue({
             });
           } else {
             job.downloadDestination || (job.downloadDestination = job.artifact.destination);
+            if (dropUnresumable(job, job.downloadDestination)) job.written = 0;
             if (!job.options) await resolveFile(job, signal);
             const held = Math.max(job.written, fs.stat(`${job.downloadDestination}.part`)?.size || 0);
             if (
@@ -1501,21 +1523,27 @@ export function createDownloadQueue({
       try {
         if (fs.exists(statusFile)) fs.remove(statusFile);
       } catch {}
-      const placeholders = {title: '{title}', percent: '{percent}'};
+      const placeholders = {title: '{title}', percent: '{percent}', count: '{count}'};
       let result;
       try {
         result = downloads.background({
           files,
           tasks,
           status: statusFile,
+          page: {port: PAGE_PORT, texts: pageTexts()},
           texts: {
             progress: t('downloads.background.progress', placeholders),
             complete: t('downloads.background.complete', placeholders),
-            failed: t('downloads.background.failed', placeholders)
+            failed: t('downloads.background.failed', placeholders),
+            started: t('downloads.background.started', placeholders)
           }
         });
       } catch (error) {
         result = error.message;
+      }
+      if (result !== true && /did not answer/.test(result) && (await daemonReported(45000))) {
+        console.log(`[download-queue] ${result}, but the background downloader reported; it holds the downloads`);
+        result = true;
       }
       if (result !== true) {
         giveBack();

@@ -201,7 +201,7 @@ JSValue begin(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv, bool d
 }
 
 // ABI v9: background({files: [{url, destination, options, task}], tasks: [{title, done, total}], status,
-// texts: {progress, complete, failed}}). true once the host's background downloader holds them, or why not.
+// texts: {progress, complete, failed, started}, page?: {port, texts}}). true once the host's background downloader holds them, or why not.
 JSValue background(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
   constexpr const char* call = "network.background";
   if (!argc || !JS_IsObject(argv[0])) return JS_ThrowTypeError(ctx, "%s: expected {files, tasks, status, texts}", call);
@@ -214,7 +214,8 @@ JSValue background(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
       !number_option(ctx, tasks.value, "length", task_count, 1, 64) || !number_option(ctx, files.value, "length", file_count, 1, 256) ||
       !string_option(ctx, texts.value, "progress", plan.progress_text, 512) ||
       !string_option(ctx, texts.value, "complete", plan.complete_text, 512) ||
-      !string_option(ctx, texts.value, "failed", plan.failed_text, 512))
+      !string_option(ctx, texts.value, "failed", plan.failed_text, 512) ||
+      !string_option(ctx, texts.value, "started", plan.started_text, 512))
     return JS_ThrowTypeError(ctx, "%s: expected 1 to 64 tasks, 1 to 256 files and notification texts", call);
   std::string status_path;
   char resolved[PATH_MAX];
@@ -222,6 +223,20 @@ JSValue background(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
       !host::resolve_path(status_path.c_str(), resolved, sizeof resolved))
     return JS_ThrowTypeError(ctx, "%s: status must be an allowed absolute file path", call);
   plan.status_path = resolved;
+  Value page{ctx, JS_GetPropertyStr(ctx, spec, "page")};
+  if (JS_IsObject(page.value)) {
+    std::uint64_t port = 0;
+    Value page_texts{ctx, JS_GetPropertyStr(ctx, page.value, "texts")};
+    if (!number_option(ctx, page.value, "port", port, 1024, 65535) || !JS_IsObject(page_texts.value))
+      return JS_ThrowTypeError(ctx, "%s: page needs a port (1024 to 65535) and texts", call);
+    plan.page_port = static_cast<std::uint16_t>(port);
+    for (const char* key : {"heading", "queued", "connecting", "downloading", "verifying", "retrying", "completed", "failed", "cancelled", "left"}) {
+      std::string text;
+      if (!string_option(ctx, page_texts.value, key, text, 256))
+        return JS_ThrowTypeError(ctx, "%s: page text %s must be a string", call, key);
+      if (!text.empty()) plan.page_texts.emplace_back(key, std::move(text));
+    }
+  }
   for (std::uint32_t i = 0; i < task_count; ++i) {
     Value item{ctx, JS_GetPropertyUint32(ctx, tasks.value, i)};
     handoff::Group group;
